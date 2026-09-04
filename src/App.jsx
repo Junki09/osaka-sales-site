@@ -64,15 +64,41 @@ function availableWeeks(data) {
   return Array.from(set).sort().reverse();
 }
 
-// A "period" is { type: 'month' | 'week', value: 'all' | <monthKey|weekStart> }
+const WEEKDAY_JP = ["日", "月", "火", "水", "木", "金", "土"];
+const dayLabel = (dateStr) => {
+  if (dateStr === "all") return "全期間";
+  const d = new Date(dateStr + "T00:00:00");
+  const [, m, day] = dateStr.split("-");
+  return `${Number(m)}/${Number(day)}(${WEEKDAY_JP[d.getDay()]})`;
+};
+function availableDays(data) {
+  const set = new Set();
+  data.calls.forEach((c) => c.date && set.add(c.date));
+  data.deals.forEach((d) => {
+    if (d.apoDate) set.add(d.apoDate);
+    if (d.apptDate) set.add(d.apptDate);
+  });
+  return Array.from(set).sort().reverse();
+}
+
+// A "period" is { type: 'month' | 'week' | 'day', value: 'all' | <monthKey|weekStart|dateStr> }
 const inPeriod = (dateStr, period) => {
   if (!period || period.value === "all") return true;
   if (!dateStr) return false;
-  return period.type === "week" ? startOfWeek(dateStr) === period.value : monthKey(dateStr) === period.value;
+  if (period.type === "week") return startOfWeek(dateStr) === period.value;
+  if (period.type === "day") return dateStr === period.value;
+  return monthKey(dateStr) === period.value;
 };
-const periodLabel = (period) =>
-  period.type === "week" ? weekLabel(period.value) : monthLabel(period.value);
-const availablePeriods = (data, type) => (type === "week" ? availableWeeks(data) : availableMonths(data));
+const periodLabel = (period) => {
+  if (period.type === "week") return weekLabel(period.value);
+  if (period.type === "day") return dayLabel(period.value);
+  return monthLabel(period.value);
+};
+const availablePeriods = (data, type) => {
+  if (type === "week") return availableWeeks(data);
+  if (type === "day") return availableDays(data);
+  return availableMonths(data);
+};
 
 const currentMonthStr = () => today().slice(0, 7);
 const emptyFive = () => ["", "", "", "", ""];
@@ -350,11 +376,19 @@ function HomeTab({ stats, data, period, periodType, periodOptions, onPeriodTypeC
             >
               週
             </button>
+            <button
+              className={"period-toggle-btn" + (periodType === "day" ? " active" : "")}
+              onClick={() => onPeriodTypeChange("day")}
+            >
+              日
+            </button>
           </div>
           <select value={period.value} onChange={(e) => onPeriodValueChange(e.target.value)} className="filter-select">
             <option value="all">全期間</option>
             {periodOptions.map((p) => (
-              <option key={p} value={p}>{periodType === "week" ? weekLabel(p) : monthLabel(p)}</option>
+              <option key={p} value={p}>
+                {periodType === "week" ? weekLabel(p) : periodType === "day" ? dayLabel(p) : monthLabel(p)}
+              </option>
             ))}
           </select>
         </div>
