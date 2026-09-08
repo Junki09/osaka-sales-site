@@ -4,6 +4,10 @@ import {
 } from "recharts";
 import { db, ref, set, onValue, firebaseConfigured, DATA_PATH } from "./firebaseClient";
 
+const OFFICES = {
+  osaka: { label: "大阪営業所", eyebrow: "SNS AD SALES", key: "osaka-sns-sales-data" },
+  tokyo: { label: "東京AI課", eyebrow: "AI SALES", key: "tokyo-ai-sales-data" },
+};
 const STATUS = { NOT_HANDLED: "未実施", APO_CANCEL: "アポキャン", REVISIT: "再訪", WON: "受注", LOST: "失注" };
 const RESULT_OPTIONS = [STATUS.NOT_HANDLED, STATUS.APO_CANCEL, STATUS.REVISIT, STATUS.WON, STATUS.LOST];
 const PRODUCTS = ["addream", "AddAI"];
@@ -36,6 +40,9 @@ const CONTRACT_PERIODS = ["なし", "12カ月", "24カ月"];
 const MEETING_TYPES = ["オンライン", "訪問"];
 const CUSTOMER_TYPES = ["新規", "既存"];
 const BANK_TRANSFER_OPTIONS = ["不必要", "必要"];
+const HP_INFO_OPTIONS = ["不必要", "必要"];
+const HP_INFO_PRODUCTS = ["AddAI一括", "AddAIクレ", "AddAI月額", "HP"];
+const UNPAID_COUNTS = ["1回目", "2回目", "3回目"];
 
 function emptyPayment() {
   return {
@@ -48,8 +55,9 @@ function emptyPayment() {
     maintenanceFee: "", domainFee: "",
     phase: PHASES[0], contractPeriod: CONTRACT_PERIODS[0], meetingType: MEETING_TYPES[0],
     paymentDates: ["", "", "", ""], paymentAmounts: ["", "", "", ""], paymentReceived: [false, false, false, false],
-    deliveryMonth: "", orderPoints: "",
+    deliveryMonth: "", orderPoints: "", expectedPoints: "",
     bankTransferForm: BANK_TRANSFER_OPTIONS[0], bankTransferDueDate: "", bankTransferShipped: false,
+    hpInfoRequired: HP_INFO_OPTIONS[0], hpInfoAcquired: false,
   };
 }
 
@@ -163,7 +171,7 @@ function weeksInMonth(monthStr) {
 }
 
 function emptyData() {
-  return { reps: [], calls: [], deals: [] };
+  return { reps: ["山田", "佐藤", "鈴木"], calls: [], deals: [] };
 }
 
 export default function App() {
@@ -173,6 +181,7 @@ export default function App() {
   const [toast, setToast] = useState("");
   const [periodType, setPeriodType] = useState("month");
   const [periodValue, setPeriodValue] = useState("all");
+  const [office, setOffice] = useState("osaka");
   const [connError, setConnError] = useState(false);
   const savingRef = useRef(false);
 
@@ -183,13 +192,14 @@ export default function App() {
   };
 
   useEffect(() => {
+    setLoading(true);
     if (!firebaseConfigured) {
       setData(emptyData());
       setConnError(true);
       setLoading(false);
       return;
     }
-    const dataRef = ref(db, DATA_PATH);
+    const dataRef = ref(db, `${DATA_PATH}/${office}`);
     const unsubscribe = onValue(
       dataRef,
       (snapshot) => {
@@ -211,18 +221,18 @@ export default function App() {
       }
     );
     return () => unsubscribe();
-  }, []);
+  }, [office]);
 
   const persist = useCallback(async (next) => {
     setData(next);
     if (!firebaseConfigured) return;
     savingRef.current = true;
     try {
-      await set(ref(db, DATA_PATH), next);
+      await set(ref(db, `${DATA_PATH}/${office}`), next);
     } catch (e) {
       flash("保存に失敗しました。通信環境をご確認ください");
     }
-  }, []);
+  }, [office]);
 
   const period = useMemo(() => ({ type: periodType, value: periodValue }), [periodType, periodValue]);
   const stats = useMemo(
@@ -255,10 +265,23 @@ export default function App() {
       )}
       <header className="board-header">
         <div className="header-left">
-          <span className="header-eyebrow">SNS AD SALES</span>
-          <h1>大阪営業所 成績ボード</h1>
+          <span className="header-eyebrow">{OFFICES[office].eyebrow}</span>
+          <h1>{OFFICES[office].label} 成績ボード</h1>
         </div>
-        <div className="header-note">データはチーム全員に共有されます</div>
+        <div className="header-right">
+          <div className="office-toggle">
+            {Object.entries(OFFICES).map(([key, o]) => (
+              <button
+                key={key}
+                className={"office-toggle-btn" + (office === key ? " active" : "")}
+                onClick={() => { setOffice(key); setTab("home"); setPeriodValue("all"); }}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <div className="header-note">データはチーム全員に共有されます</div>
+        </div>
       </header>
 
       <div className="board-body">
@@ -272,6 +295,8 @@ export default function App() {
             ["payments", "入金管理"],
             ["invoices", "請求書管理"],
             ["banktransfer", "口座振替管理"],
+            ["unpaid", "未収管理"],
+            ["hpinfo", "HP情報取得状況"],
             ["data", "データ移行"],
           ].map(([key, label]) => (
             <button
@@ -303,6 +328,8 @@ export default function App() {
           {tab === "payments" && <PaymentsTab data={data} persist={persist} flash={flash} />}
           {tab === "invoices" && <InvoiceTab data={data} persist={persist} />}
           {tab === "banktransfer" && <BankTransferTab data={data} persist={persist} />}
+          {tab === "unpaid" && <UnpaidTab data={data} persist={persist} flash={flash} />}
+          {tab === "hpinfo" && <HPInfoTab data={data} persist={persist} />}
           {tab === "data" && <DataTab data={data} persist={persist} flash={flash} />}
         </main>
       </div>
@@ -716,6 +743,11 @@ function CallsTab({ data, persist, flash }) {
   const [decisionMakers, setDecisionMakers] = useState("");
   const [scheduleSet, setScheduleSet] = useState("");
 
+  useEffect(() => {
+    if (!data.reps.includes(rep)) setRep(data.reps[0] || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.reps]);
+
   const add = () => {
     if (!rep) return flash("営業メンバーを選択してください");
     if (!count || Number(count) < 0) return flash("コール数を入力してください");
@@ -814,6 +846,13 @@ function DealsTab({ data, persist, flash }) {
   const [product, setProduct] = useState(PRODUCTS[0]);
   const [filterRep, setFilterRep] = useState("すべて");
   const [filterProduct, setFilterProduct] = useState("すべて");
+  const [filterMonth, setFilterMonth] = useState("all");
+  const [filterDate, setFilterDate] = useState("");
+
+  useEffect(() => {
+    if (!data.reps.includes(apoRep)) setApoRep(data.reps[0] || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.reps]);
 
   const addDeal = () => {
     if (!company.trim()) return flash("企業名を入力してください");
@@ -835,9 +874,13 @@ function DealsTab({ data, persist, flash }) {
 
   const removeDeal = (id) => persist({ ...data, deals: data.deals.filter((d) => d.id !== id) });
 
+  const apptMonths = Array.from(new Set(data.deals.map((d) => d.apptDate && monthKey(d.apptDate)).filter(Boolean))).sort().reverse();
+
   const visible = data.deals
     .filter((d) => filterRep === "すべて" || d.apoRep === filterRep || d.meetingRep === filterRep)
     .filter((d) => filterProduct === "すべて" || (d.product || PRODUCTS[0]) === filterProduct)
+    .filter((d) => filterMonth === "all" || monthKey(d.apptDate) === filterMonth)
+    .filter((d) => !filterDate || d.apptDate === filterDate)
     .sort((a, b) => (a.apoDate < b.apoDate ? 1 : -1));
 
   return (
@@ -883,6 +926,20 @@ function DealsTab({ data, persist, flash }) {
               <option>すべて</option>
               {PRODUCTS.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
+            <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="filter-select">
+              <option value="all">アポイント日: 全期間</option>
+              {apptMonths.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+            </select>
+            <input
+              type="date"
+              value={filterDate}
+              onChange={(e) => setFilterDate(e.target.value)}
+              onClick={openPicker}
+              className="filter-select"
+            />
+            {filterDate && (
+              <button className="text-btn" onClick={() => setFilterDate("")}>日付をクリア</button>
+            )}
           </div>
         </div>
         <div className="table-wrap">
@@ -1089,6 +1146,7 @@ function PaymentsTab({ data, persist, flash }) {
   const [form, setForm] = useState(emptyPayment());
   const [splitWithRep, setSplitWithRep] = useState("");
   const [splitPoints, setSplitPoints] = useState("");
+  const [splitExpectedPoints, setSplitExpectedPoints] = useState("");
 
   useEffect(() => {
     if (!data.reps.includes(selfRep)) setSelfRep(data.reps[0] || "");
@@ -1126,7 +1184,7 @@ function PaymentsTab({ data, persist, flash }) {
   const addRecord = () => {
     if (!form.company.trim()) return flash("会社名を入力してください");
     if (!form.salesRep) return flash("営業した人を選択してください");
-    if (splitWithRep && !splitPoints) return flash("折半Pの数を入力してください");
+    if (splitWithRep && !splitPoints && !splitExpectedPoints) return flash("折半Pまたは見込折半Pの数を入力してください");
     const record = {
       ...form,
       id: uid(),
@@ -1146,12 +1204,14 @@ function PaymentsTab({ data, persist, flash }) {
         customerType: form.customerType,
         deliveryMonth: form.deliveryMonth,
         orderPoints: splitPoints,
+        expectedPoints: splitExpectedPoints,
       });
     }
     persist({ ...data, payments: [...newRecords, ...payments] });
     setForm(emptyPayment());
     setSplitWithRep("");
     setSplitPoints("");
+    setSplitExpectedPoints("");
     flash(splitWithRep ? "登録しました（折半Pも自動登録しました）" : "登録しました");
   };
 
@@ -1191,6 +1251,11 @@ function PaymentsTab({ data, persist, flash }) {
     payments
       .filter((p) => p.assignedTo === rep && monthKey(p.date) === monthStr)
       .reduce((s, p) => s + Number(p.orderPoints || 0), 0);
+  const expectedPFor = (rep) =>
+    payments
+      .filter((p) => p.assignedTo === rep && monthKey(p.date) === monthStr)
+      .reduce((s, p) => s + Number(p.expectedPoints || 0), 0);
+  const combinedPFor = (rep) => currentPFor(rep) + expectedPFor(rep);
   const targetPFor = (rep) => Number(targets[rep]?.[monthStr] || 0);
 
   const monthlyTeams = data.monthlyTeams || {};
@@ -1208,10 +1273,14 @@ function PaymentsTab({ data, persist, flash }) {
   const myRecords = payments.filter((p) => p.assignedTo === selfRep).sort((a, b) => (a.date < b.date ? 1 : -1));
   const myTarget = targetPFor(selfRep);
   const myCurrent = currentPFor(selfRep);
+  const myExpected = expectedPFor(selfRep);
+  const myCombined = myCurrent + myExpected;
   const myTotalP = promotionCurrentPFor(selfRep);
   const promotionTargetP = Number(promotionTargets[selfRep] || 0);
   const memberTargetSum = teamMembers.reduce((s, r) => s + targetPFor(r), 0);
   const teamCurrentTotal = teamMembers.reduce((s, r) => s + currentPFor(r), 0);
+  const teamExpectedTotal = teamMembers.reduce((s, r) => s + expectedPFor(r), 0);
+  const teamCombinedTotal = teamCurrentTotal + teamExpectedTotal;
 
   return (
     <div className="tab-panel">
@@ -1238,6 +1307,8 @@ function PaymentsTab({ data, persist, flash }) {
                 : (myTarget && myCurrent >= myTarget ? "win" : undefined)
             }
           />
+          <KpiCard label={isManager ? "チーム見込P" : "見込P"} value={isManager ? teamExpectedTotal : myExpected} />
+          <KpiCard label={isManager ? "見込含むチーム現状P" : "見込含む現状P"} value={isManager ? teamCombinedTotal : myCombined} />
           <KpiCard
             label={isManager ? "チーム達成率" : "達成率"}
             value={isManager ? pct(memberTargetSum ? teamCurrentTotal / memberTargetSum : NaN) : pct(myTarget ? myCurrent / myTarget : NaN)}
@@ -1308,10 +1379,16 @@ function PaymentsTab({ data, persist, flash }) {
               </select>
             </div>
             {splitWithRep && (
-              <div className="form-row">
-                <label>折半Pの数</label>
-                <input type="number" min="0" value={splitPoints} onChange={(e) => setSplitPoints(e.target.value)} placeholder="例）5" />
-              </div>
+              <>
+                <div className="form-row">
+                  <label>折半Pの数</label>
+                  <input type="number" min="0" value={splitPoints} onChange={(e) => setSplitPoints(e.target.value)} placeholder="例）5" />
+                </div>
+                <div className="form-row">
+                  <label>見込折半P<span className="field-hint">（未確定の場合）</span></label>
+                  <input type="number" min="0" value={splitExpectedPoints} onChange={(e) => setSplitExpectedPoints(e.target.value)} placeholder="例）5" />
+                </div>
+              </>
             )}
             <div className="form-row">
               <label>新規/既存</label>
@@ -1412,6 +1489,7 @@ function PaymentsTab({ data, persist, flash }) {
             </div>
             <div className="form-row"><label>納品月</label><input type="month" value={form.deliveryMonth} onChange={(e) => setField("deliveryMonth", e.target.value)} onClick={openPicker} /></div>
             <div className="form-row"><label>受注P</label><input type="number" min="0" value={form.orderPoints} onChange={(e) => setField("orderPoints", e.target.value)} /></div>
+            <div className="form-row"><label>見込P<span className="field-hint">（未確定の場合）</span></label><input type="number" min="0" value={form.expectedPoints} onChange={(e) => setField("expectedPoints", e.target.value)} /></div>
           </div>
         </div>
 
@@ -1456,6 +1534,20 @@ function PaymentsTab({ data, persist, flash }) {
           </div>
         </div>
 
+        {HP_INFO_PRODUCTS.includes(form.product) && (
+          <div className="payment-section">
+            <h3 className="payment-section-title">⑦ HP情報</h3>
+            <div className="payment-form-grid">
+              <div className="form-row">
+                <label>要否</label>
+                <select value={form.hpInfoRequired} onChange={(e) => setField("hpInfoRequired", e.target.value)}>
+                  {HP_INFO_OPTIONS.map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+
         <button className="primary-btn" onClick={addRecord}>登録する</button>
       </section>
 
@@ -1470,15 +1562,15 @@ function PaymentsTab({ data, persist, flash }) {
                 <th>クレ初期</th><th>クレ分</th><th>クレ合計</th><th>保守費用</th><th>ドメイン代</th>
                 <th>フェーズ</th><th>契約期間</th><th>商談</th>
                 <th>入金日1</th><th>金額1</th><th>入金日2</th><th>金額2</th><th>入金日3</th><th>金額3</th><th>入金日4</th><th>金額4</th>
-                <th>口座振替用紙</th><th>振替期日</th>
-                <th>納品月</th><th>受注P</th><th>営業</th><th>担当</th><th></th>
+                <th>口座振替用紙</th><th>振替期日</th><th>HP情報</th>
+                <th>納品月</th><th>受注P</th><th>見込P</th><th>営業</th><th>担当</th><th></th>
               </tr>
             </thead>
             <tbody>
               {myRecords.map((p) => (
                 <PaymentRow key={p.id} p={p} reps={data.reps} onUpdate={(patch) => updateRecord(p.id, patch)} onRemove={() => removeRecord(p.id)} />
               ))}
-              {myRecords.length === 0 && <tr><td colSpan={33} className="empty-row">記録がありません</td></tr>}
+              {myRecords.length === 0 && <tr><td colSpan={35} className="empty-row">記録がありません</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1662,8 +1754,16 @@ function PaymentRow({ p, reps, onUpdate, onRemove }) {
           <input type="date" value={p.bankTransferDueDate || ""} onChange={(e) => onUpdate({ bankTransferDueDate: e.target.value })} onClick={openPicker} />
         ) : <span className="dim">—</span>}
       </td>
+      <td>
+        {HP_INFO_PRODUCTS.includes(p.product) ? (
+          <select value={p.hpInfoRequired || HP_INFO_OPTIONS[0]} onChange={(e) => onUpdate({ hpInfoRequired: e.target.value })}>
+            {HP_INFO_OPTIONS.map((v) => <option key={v} value={v}>{v}</option>)}
+          </select>
+        ) : <span className="dim">—</span>}
+      </td>
       <td><input type="month" value={p.deliveryMonth} onChange={(e) => onUpdate({ deliveryMonth: e.target.value })} onClick={openPicker} /></td>
       <td><input type="number" min="0" className="num-input" value={p.orderPoints} onChange={(e) => onUpdate({ orderPoints: e.target.value })} /></td>
+      <td><input type="number" min="0" className="num-input" value={p.expectedPoints || ""} onChange={(e) => onUpdate({ expectedPoints: e.target.value })} /></td>
       <td className="rep-cell">{p.salesRep}</td>
       <td>
         <select value={p.assignedTo} onChange={(e) => onUpdate({ assignedTo: e.target.value })}>
@@ -1697,6 +1797,7 @@ function InvoiceTab({ data, persist }) {
           dueDate: dates[i],
           paymentMethod: p.paymentMethod,
           received: !!received[i],
+          salesRep: p.salesRep,
         });
       }
     }
@@ -1736,7 +1837,7 @@ function InvoiceTab({ data, persist }) {
           <table className="score-table">
             <thead>
               <tr>
-                <th>会社名</th><th>商材</th><th>金額</th><th>入金予定日</th><th>残り日数</th><th>支払い方法</th><th>入金</th>
+                <th>会社名</th><th>商材</th><th>金額</th><th>入金予定日</th><th>残り日数</th><th>支払い方法</th><th>営業</th><th>入金</th>
               </tr>
             </thead>
             <tbody>
@@ -1750,6 +1851,7 @@ function InvoiceTab({ data, persist }) {
                     <td>{r.dueDate}</td>
                     <td className="num invoice-days">{d === null ? "—" : `${d}日`}</td>
                     <td>{r.paymentMethod}</td>
+                    <td className="rep-cell">{r.salesRep}</td>
                     <td className="invoice-check-cell">
                       <input
                         type="checkbox"
@@ -1760,7 +1862,7 @@ function InvoiceTab({ data, persist }) {
                   </tr>
                 );
               })}
-              {visibleRows.length === 0 && <tr><td colSpan={7} className="empty-row">入金予定日が入力された記録がありません</td></tr>}
+              {visibleRows.length === 0 && <tr><td colSpan={8} className="empty-row">入金予定日が入力された記録がありません</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1781,6 +1883,7 @@ function BankTransferTab({ data, persist }) {
       product: p.product,
       dueDate: p.bankTransferDueDate,
       shipped: !!p.bankTransferShipped,
+      salesRep: p.salesRep,
     }))
     .sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0));
 
@@ -1803,7 +1906,7 @@ function BankTransferTab({ data, persist }) {
         <div className="table-wrap">
           <table className="score-table">
             <thead>
-              <tr><th>会社名</th><th>商材</th><th>残り日数</th><th>発送完了</th></tr>
+              <tr><th>会社名</th><th>商材</th><th>残り日数</th><th>営業</th><th>発送完了</th></tr>
             </thead>
             <tbody>
               {rows.map((r) => {
@@ -1813,13 +1916,186 @@ function BankTransferTab({ data, persist }) {
                     <td>{r.company}</td>
                     <td>{r.product}</td>
                     <td className="num invoice-days">{d === null ? "—" : `${d}日`}</td>
+                    <td className="rep-cell">{r.salesRep}</td>
                     <td className="invoice-check-cell">
                       <input type="checkbox" checked={r.shipped} onChange={() => toggleShipped(r.id)} />
                     </td>
                   </tr>
                 );
               })}
-              {rows.length === 0 && <tr><td colSpan={4} className="empty-row">口座振替用紙が必要な企業がありません</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={5} className="empty-row">口座振替用紙が必要な企業がありません</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ---------- Unpaid Tab (未収管理) ----------
+function UnpaidTab({ data, persist, flash }) {
+  const records = data.unpaidRecords || [];
+  const [company, setCompany] = useState("");
+  const [amount, setAmount] = useState("");
+  const [item, setItem] = useState("");
+  const [count, setCount] = useState(UNPAID_COUNTS[0]);
+  const [dueDate, setDueDate] = useState("");
+  const [rep, setRep] = useState(data.reps[0] || "");
+
+  useEffect(() => {
+    if (!data.reps.includes(rep)) setRep(data.reps[0] || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.reps]);
+
+  const addRecord = () => {
+    if (!company.trim()) return flash("企業名を入力してください");
+    const record = { id: uid(), company: company.trim(), amount, item, count, dueDate, rep };
+    persist({ ...data, unpaidRecords: [record, ...records] });
+    setCompany("");
+    setAmount("");
+    setItem("");
+    setCount(UNPAID_COUNTS[0]);
+    setDueDate("");
+    flash("登録しました");
+  };
+
+  const updateRecord = (id, patch) => {
+    persist({ ...data, unpaidRecords: records.map((r) => (r.id === id ? { ...r, ...patch } : r)) });
+  };
+  const removeRecord = (id) => {
+    persist({ ...data, unpaidRecords: records.filter((r) => r.id !== id) });
+  };
+  const markPaid = (id) => {
+    removeRecord(id);
+    flash("入金確認済みとして一覧から削除しました");
+  };
+
+  return (
+    <div className="tab-panel">
+      <section className="panel form-panel">
+        <h2>未収企業を登録</h2>
+        <div className="form-row">
+          <label>企業名</label>
+          <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="例）株式会社サンプル" />
+        </div>
+        <div className="form-row">
+          <label>担当営業</label>
+          <select value={rep} onChange={(e) => setRep(e.target.value)}>
+            {data.reps.map((r) => <option key={r} value={r}>{r}</option>)}
+            {data.reps.length === 0 && <option value="">営業メンバーを登録してください</option>}
+          </select>
+        </div>
+        <div className="form-row">
+          <label>金額</label>
+          <input type="text" inputMode="numeric" value={formatNum(amount)} onChange={(e) => setAmount(parseNum(e.target.value))} placeholder="円" />
+        </div>
+        <div className="form-row">
+          <label>項目</label>
+          <input value={item} onChange={(e) => setItem(e.target.value)} placeholder="例）〇月分Addream運用費" />
+        </div>
+        <div className="form-row">
+          <label>未収回数</label>
+          <select value={count} onChange={(e) => setCount(e.target.value)}>
+            {UNPAID_COUNTS.map((v) => <option key={v} value={v}>{v}</option>)}
+          </select>
+        </div>
+        <div className="form-row">
+          <label>入金期日</label>
+          <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} onClick={openPicker} />
+        </div>
+        <button className="primary-btn" onClick={addRecord}>登録する</button>
+      </section>
+
+      <section className="panel">
+        <h2>未収企業一覧<span className="hint">「入金チェック」を付けると一覧から削除されます</span></h2>
+        <div className="table-wrap">
+          <table className="score-table deals-table">
+            <thead>
+              <tr><th>企業名</th><th>担当営業</th><th>金額</th><th>項目</th><th>未収回数</th><th>入金期日</th><th>入金チェック</th><th></th></tr>
+            </thead>
+            <tbody>
+              {records.map((r) => (
+                <tr key={r.id}>
+                  <td><input className="company-input" value={r.company} onChange={(e) => updateRecord(r.id, { company: e.target.value })} /></td>
+                  <td>
+                    <select value={r.rep || ""} onChange={(e) => updateRecord(r.id, { rep: e.target.value })}>
+                      {data.reps.map((rp) => <option key={rp} value={rp}>{rp}</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      type="text" inputMode="numeric" className="num-input"
+                      value={formatNum(r.amount)}
+                      onChange={(e) => updateRecord(r.id, { amount: parseNum(e.target.value) })}
+                    />
+                  </td>
+                  <td><input className="company-input" value={r.item || ""} onChange={(e) => updateRecord(r.id, { item: e.target.value })} placeholder="項目名" /></td>
+                  <td>
+                    <select
+                      value={r.count}
+                      className={r.count === "3回目" ? "status-lose" : r.count === "2回目" ? "status-revisit" : ""}
+                      onChange={(e) => updateRecord(r.id, { count: e.target.value })}
+                    >
+                      {UNPAID_COUNTS.map((v) => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </td>
+                  <td><input type="date" value={r.dueDate || ""} onChange={(e) => updateRecord(r.id, { dueDate: e.target.value })} onClick={openPicker} /></td>
+                  <td className="invoice-check-cell">
+                    <input type="checkbox" checked={false} onChange={() => markPaid(r.id)} />
+                  </td>
+                  <td><button className="text-btn danger" onClick={() => removeRecord(r.id)}>削除</button></td>
+                </tr>
+              ))}
+              {records.length === 0 && <tr><td colSpan={8} className="empty-row">未収企業がありません</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ---------- HP Info Tab (HP情報取得状況) ----------
+function HPInfoTab({ data, persist }) {
+  const payments = data.payments || [];
+
+  const rows = payments
+    .filter((p) => HP_INFO_PRODUCTS.includes(p.product) && p.hpInfoRequired === "必要")
+    .map((p) => ({ id: p.id, company: p.company, product: p.product, acquired: !!p.hpInfoAcquired, salesRep: p.salesRep }));
+
+  const pendingCount = rows.filter((r) => !r.acquired).length;
+
+  const toggleAcquired = (id) => {
+    const nextPayments = payments.map((p) => (p.id === id ? { ...p, hpInfoAcquired: !p.hpInfoAcquired } : p));
+    persist({ ...data, payments: nextPayments });
+  };
+
+  return (
+    <div className="tab-panel">
+      <section className="panel">
+        <h2>HP情報取得状況<span className="hint">入金管理で「HP情報: 必要」にした企業を自動表示します</span></h2>
+
+        <div className="kpi-strip payments-kpi-strip">
+          <KpiCard label="未取得の件数" value={pendingCount} />
+        </div>
+
+        <div className="table-wrap">
+          <table className="score-table">
+            <thead>
+              <tr><th>会社名</th><th>商材</th><th>営業</th><th>取得</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className={r.acquired ? "invoice-received" : ""}>
+                  <td>{r.company}</td>
+                  <td>{r.product}</td>
+                  <td className="rep-cell">{r.salesRep}</td>
+                  <td className="invoice-check-cell">
+                    <input type="checkbox" checked={r.acquired} onChange={() => toggleAcquired(r.id)} />
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && <tr><td colSpan={4} className="empty-row">HP情報が必要な企業がありません</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1926,6 +2202,14 @@ function StyleBlock() {
       }
       .board-header h1 { margin: 4px 0 0; font-size: 22px; font-weight: 700; }
       .header-note { font-size: 12px; color: var(--ink-dim); }
+      .header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+      .office-toggle { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+      .office-toggle-btn {
+        background: #FFFFFF; border: none; color: var(--ink-dim); padding: 6px 14px;
+        font-size: 12px; font-family: inherit; cursor: pointer;
+      }
+      .office-toggle-btn + .office-toggle-btn { border-left: 1px solid var(--line); }
+      .office-toggle-btn.active { background: var(--amber); color: #FFFFFF; font-weight: 700; }
       .board-body { display: flex; min-height: calc(100vh - 90px); }
       .board-nav {
         width: 168px; flex-shrink: 0; padding: 18px 10px; display: flex; flex-direction: column; gap: 4px;
