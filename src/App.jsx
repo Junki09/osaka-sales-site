@@ -171,7 +171,19 @@ function weeksInMonth(monthStr) {
 }
 
 function emptyData() {
-  return { reps: ["山田", "佐藤", "鈴木"], calls: [], deals: [] };
+  return { reps: [], calls: [], deals: [] };
+}
+
+function normalizeData(val) {
+  return {
+    ...emptyData(),
+    ...val,
+    reps: Array.isArray(val?.reps) ? val.reps : [],
+    calls: Array.isArray(val?.calls) ? val.calls : [],
+    deals: Array.isArray(val?.deals) ? val.deals : [],
+    payments: Array.isArray(val?.payments) ? val.payments : [],
+    unpaidRecords: Array.isArray(val?.unpaidRecords) ? val.unpaidRecords : [],
+  };
 }
 
 export default function App() {
@@ -205,7 +217,7 @@ export default function App() {
       (snapshot) => {
         const val = snapshot.val();
         if (val) {
-          if (!savingRef.current) setData(val);
+          if (!savingRef.current) setData(normalizeData(val));
           savingRef.current = false;
         } else {
           const seed = emptyData();
