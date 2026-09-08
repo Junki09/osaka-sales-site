@@ -22,6 +22,7 @@ const PAYMENT_METHODS = ["現金", "クレカ", "アプラス", "タイヘイ", 
 const MAINTENANCE_OPTIONS = ["3300", "5500"];
 const DOMAIN_OPTIONS = ["550"];
 const yen = (v) => `${Number(v).toLocaleString()}円`;
+const roundP = (n) => Math.round(n * 100) / 100;
 const formatNum = (v) => (v === "" || v === undefined || v === null ? "" : Number(v).toLocaleString());
 const parseNum = (v) => v.replace(/[^0-9]/g, "");
 const companyFontSize = (name) => {
@@ -1245,9 +1246,9 @@ function PaymentsTab({ data, persist, flash }) {
   };
   const recent3MonthsPFor = (rep) => {
     const window = [monthStr, monthsBack(monthStr, 1), monthsBack(monthStr, 2)];
-    return payments
+    return roundP(payments
       .filter((p) => p.assignedTo === rep && window.includes(monthKey(p.date)))
-      .reduce((s, p) => s + Number(p.orderPoints || 0), 0);
+      .reduce((s, p) => s + Number(p.orderPoints || 0), 0));
   };
   const promotionCurrentOverrides = data.promotionCurrentOverrides || {};
   const setPromotionCurrent = (rep, value) => {
@@ -1260,14 +1261,14 @@ function PaymentsTab({ data, persist, flash }) {
   };
 
   const currentPFor = (rep) =>
-    payments
+    roundP(payments
       .filter((p) => p.assignedTo === rep && monthKey(p.date) === monthStr)
-      .reduce((s, p) => s + Number(p.orderPoints || 0), 0);
+      .reduce((s, p) => s + Number(p.orderPoints || 0), 0));
   const expectedPFor = (rep) =>
-    payments
+    roundP(payments
       .filter((p) => p.assignedTo === rep && monthKey(p.date) === monthStr)
-      .reduce((s, p) => s + Number(p.expectedPoints || 0), 0);
-  const combinedPFor = (rep) => currentPFor(rep) + expectedPFor(rep);
+      .reduce((s, p) => s + Number(p.expectedPoints || 0), 0));
+  const combinedPFor = (rep) => roundP(currentPFor(rep) + expectedPFor(rep));
   const targetPFor = (rep) => Number(targets[rep]?.[monthStr] || 0);
 
   const monthlyTeams = data.monthlyTeams || {};
@@ -1286,13 +1287,13 @@ function PaymentsTab({ data, persist, flash }) {
   const myTarget = targetPFor(selfRep);
   const myCurrent = currentPFor(selfRep);
   const myExpected = expectedPFor(selfRep);
-  const myCombined = myCurrent + myExpected;
+  const myCombined = roundP(myCurrent + myExpected);
   const myTotalP = promotionCurrentPFor(selfRep);
   const promotionTargetP = Number(promotionTargets[selfRep] || 0);
-  const memberTargetSum = teamMembers.reduce((s, r) => s + targetPFor(r), 0);
-  const teamCurrentTotal = teamMembers.reduce((s, r) => s + currentPFor(r), 0);
-  const teamExpectedTotal = teamMembers.reduce((s, r) => s + expectedPFor(r), 0);
-  const teamCombinedTotal = teamCurrentTotal + teamExpectedTotal;
+  const memberTargetSum = roundP(teamMembers.reduce((s, r) => s + targetPFor(r), 0));
+  const teamCurrentTotal = roundP(teamMembers.reduce((s, r) => s + currentPFor(r), 0));
+  const teamExpectedTotal = roundP(teamMembers.reduce((s, r) => s + expectedPFor(r), 0));
+  const teamCombinedTotal = roundP(teamCurrentTotal + teamExpectedTotal);
 
   return (
     <div className="tab-panel">
