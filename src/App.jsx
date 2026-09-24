@@ -56,6 +56,7 @@ function emptyPayment() {
     maintenanceFee: "", domainFee: "",
     phase: PHASES[0], contractPeriod: CONTRACT_PERIODS[0], meetingType: MEETING_TYPES[0],
     paymentDates: ["", "", "", ""], paymentAmounts: ["", "", "", ""], paymentReceived: [false, false, false, false],
+    invoiceIssued: [false, false, false, false],
     deliveryMonth: "", orderPoints: "", expectedPoints: "",
     bankTransferForm: BANK_TRANSFER_OPTIONS[0], bankTransferDueDate: "", bankTransferShipped: false,
     hpInfoRequired: HP_INFO_OPTIONS[0], hpInfoAcquired: false,
@@ -1798,6 +1799,7 @@ function InvoiceTab({ data, persist }) {
     const dates = p.paymentDates || [];
     const amounts = p.paymentAmounts || [];
     const received = p.paymentReceived || [];
+    const issued = p.invoiceIssued || [];
     for (let i = 0; i < 4; i++) {
       if (dates[i]) {
         rows.push({
@@ -1810,6 +1812,7 @@ function InvoiceTab({ data, persist }) {
           dueDate: dates[i],
           paymentMethod: p.paymentMethod,
           received: !!received[i],
+          issued: !!issued[i],
           salesRep: p.salesRep,
         });
       }
@@ -1820,6 +1823,7 @@ function InvoiceTab({ data, persist }) {
   const monthOptions = Array.from(new Set(rows.map((r) => monthKey(r.dueDate)))).sort();
   const visibleRows = monthStr === "all" ? rows : rows.filter((r) => monthKey(r.dueDate) === monthStr);
   const unreceivedCount = visibleRows.filter((r) => !r.received).length;
+  const unissuedCount = visibleRows.filter((r) => !r.issued).length;
 
   const toggleReceived = (paymentId, index) => {
     const nextPayments = payments.map((p) => {
@@ -1827,6 +1831,16 @@ function InvoiceTab({ data, persist }) {
       const arr = [...(p.paymentReceived || [false, false, false, false])];
       arr[index] = !arr[index];
       return { ...p, paymentReceived: arr };
+    });
+    persist({ ...data, payments: nextPayments });
+  };
+
+  const toggleIssued = (paymentId, index) => {
+    const nextPayments = payments.map((p) => {
+      if (p.id !== paymentId) return p;
+      const arr = [...(p.invoiceIssued || [false, false, false, false])];
+      arr[index] = !arr[index];
+      return { ...p, invoiceIssued: arr };
     });
     persist({ ...data, payments: nextPayments });
   };
@@ -1843,6 +1857,7 @@ function InvoiceTab({ data, persist }) {
         </div>
 
         <div className="kpi-strip payments-kpi-strip">
+          <KpiCard label="未発行の件数" value={unissuedCount} />
           <KpiCard label="未入金の件数" value={unreceivedCount} />
         </div>
 
@@ -1850,7 +1865,7 @@ function InvoiceTab({ data, persist }) {
           <table className="score-table">
             <thead>
               <tr>
-                <th>会社名</th><th>商材</th><th>金額</th><th>入金予定日</th><th>残り日数</th><th>支払い方法</th><th>営業</th><th>入金</th>
+                <th>会社名</th><th>商材</th><th>金額</th><th>入金予定日</th><th>残り日数</th><th>支払い方法</th><th>営業</th><th>請求書発行</th><th>入金</th>
               </tr>
             </thead>
             <tbody>
@@ -1868,6 +1883,13 @@ function InvoiceTab({ data, persist }) {
                     <td className="invoice-check-cell">
                       <input
                         type="checkbox"
+                        checked={r.issued}
+                        onChange={() => toggleIssued(r.paymentId, r.index)}
+                      />
+                    </td>
+                    <td className="invoice-check-cell">
+                      <input
+                        type="checkbox"
                         checked={r.received}
                         onChange={() => toggleReceived(r.paymentId, r.index)}
                       />
@@ -1875,7 +1897,7 @@ function InvoiceTab({ data, persist }) {
                   </tr>
                 );
               })}
-              {visibleRows.length === 0 && <tr><td colSpan={8} className="empty-row">入金予定日が入力された記録がありません</td></tr>}
+              {visibleRows.length === 0 && <tr><td colSpan={9} className="empty-row">入金予定日が入力された記録がありません</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1962,7 +1984,7 @@ function UnpaidTab({ data, persist, flash }) {
 
   const addRecord = () => {
     if (!company.trim()) return flash("企業名を入力してください");
-    const record = { id: uid(), company: company.trim(), amount, item, count, dueDate, rep };
+    const record = { id: uid(), company: company.trim(), amount, item, count, dueDate, rep, invoiceIssued: false };
     persist({ ...data, unpaidRecords: [record, ...records] });
     setCompany("");
     setAmount("");
@@ -2024,7 +2046,7 @@ function UnpaidTab({ data, persist, flash }) {
         <div className="table-wrap">
           <table className="score-table deals-table">
             <thead>
-              <tr><th>企業名</th><th>担当営業</th><th>金額</th><th>項目</th><th>未収回数</th><th>入金期日</th><th>入金チェック</th><th></th></tr>
+              <tr><th>企業名</th><th>担当営業</th><th>金額</th><th>項目</th><th>未収回数</th><th>入金期日</th><th>請求書発行</th><th>入金チェック</th><th></th></tr>
             </thead>
             <tbody>
               {records.map((r) => (
@@ -2054,12 +2076,19 @@ function UnpaidTab({ data, persist, flash }) {
                   </td>
                   <td><input type="date" value={r.dueDate || ""} onChange={(e) => updateRecord(r.id, { dueDate: e.target.value })} onClick={openPicker} /></td>
                   <td className="invoice-check-cell">
+                    <input
+                      type="checkbox"
+                      checked={!!r.invoiceIssued}
+                      onChange={() => updateRecord(r.id, { invoiceIssued: !r.invoiceIssued })}
+                    />
+                  </td>
+                  <td className="invoice-check-cell">
                     <input type="checkbox" checked={false} onChange={() => markPaid(r.id)} />
                   </td>
                   <td><button className="text-btn danger" onClick={() => removeRecord(r.id)}>削除</button></td>
                 </tr>
               ))}
-              {records.length === 0 && <tr><td colSpan={8} className="empty-row">未収企業がありません</td></tr>}
+              {records.length === 0 && <tr><td colSpan={9} className="empty-row">未収企業がありません</td></tr>}
             </tbody>
           </table>
         </div>
