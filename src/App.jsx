@@ -15,6 +15,61 @@ const LOSS_REASONS = ["タイミングNG", "決済権なし", "考えたい", "�
 
 const REP_ROLES = ["一般", "主任", "MG", "課長", "次長"];
 const MAIN_PRODUCTS = ["Addream一括", "Addream月額", "Addreamクレ", "AddAI一括", "AddAI月額", "AddAIクレ", "LP", "Addmovie", "HP", "公式LINE", "engage", "動画単品", "バナー追加", "ペライチ", "meta配信追加", "折半P"];
+
+const BUDGET_AUTO_CATEGORIES = ["Addream現金", "Addreamクレ", "AddAI現金", "AddAIクレ", "LP", "Addmovie", "HP", "その他"];
+const BUDGET_MANUAL_CATEGORIES = ["Addream月額", "AddAI月額"];
+const BUDGET_ALL_CATEGORIES = [...BUDGET_AUTO_CATEGORIES, ...BUDGET_MANUAL_CATEGORIES];
+const BUDGET_TOTAL_CATEGORIES = ["Addream現金", "Addreamクレ", "AddAI現金", "AddAIクレ", "LP", "Addmovie", "HP", "Addream月額", "AddAI月額"];
+const MITOKO_OPTIONS = ["無", "済"];
+
+function budgetCategoryFor(product) {
+  if (product === "Addream一括" || product === "Addream月額") return "Addream現金";
+  if (product === "Addreamクレ") return "Addreamクレ";
+  if (product === "AddAI一括" || product === "AddAI月額" || product === "バナー追加") return "AddAI現金";
+  if (product === "AddAIクレ") return "AddAIクレ";
+  if (product === "LP") return "LP";
+  if (product === "Addmovie") return "Addmovie";
+  if (product === "HP") return "HP";
+  if (["公式LINE", "engage", "動画単品", "ペライチ", "meta配信追加"].includes(product)) return "その他";
+  return null;
+}
+const BUDGET_CREDIT_TOTAL_PRODUCTS = ["Addreamクレ", "AddAIクレ", "LP", "Addmovie", "HP"];
+function budgetAmountFor(p) {
+  if (BUDGET_CREDIT_TOTAL_PRODUCTS.includes(p.product)) {
+    return Number(p.creditInitial || 0) + Number(p.creditInstallment || 0);
+  }
+  return Number(p.initialFee || 0);
+}
+function fiscalYearOf(monthStr) {
+  const [y, m] = monthStr.split("-").map(Number);
+  return m >= 4 ? y : y - 1;
+}
+function fiscalYearMonths(monthStr) {
+  const fiscalYear = fiscalYearOf(monthStr);
+  const months = [];
+  for (let i = 0; i < 12; i++) {
+    const mm = 4 + i;
+    const yy = fiscalYear + Math.floor((mm - 1) / 12);
+    const mmNorm = ((mm - 1) % 12) + 1;
+    months.push(`${yy}-${String(mmNorm).padStart(2, "0")}`);
+  }
+  return months;
+}
+
+function computeAutoBudgetActuals(payments, monthStr) {
+  const sums = {};
+  BUDGET_AUTO_CATEGORIES.forEach((c) => { sums[c] = 0; });
+  payments
+    .filter((p) => p.deliveryMonth === monthStr)
+    .forEach((p) => {
+      const cat = budgetCategoryFor(p.product);
+      if (!cat) return;
+      const amt = budgetAmountFor(p);
+      sums[cat] = roundP(sums[cat] + amt);
+      if (cat === "その他") sums["Addream現金"] = roundP(sums["Addream現金"] + amt);
+    });
+  return sums;
+}
 const SUB_PRODUCTS = ["Addream", "AddAI", "LP", "HP", "Addmovie", "公式LINE", "engage", "動画単品", "バナー追加", "ペライチ", "meta配信追加", "ゼロページ"];
 const INDUSTRIES = ["不動産", "建築・リフォーム", "運送・軽貨物", "塗装", "福祉", "塾", "買取", "不用品回収", "清掃", "士業", "医療", "警備", "製造業", "その他"];
 const ELEMENTS = ["SK", "RM", "シェア", "NSS", "サングローブ", "イツザイ", "ファインズ", "エンジョイ", "リカオン", "ブラニュー", "EF", "アイフラッグ", "スフィーダクロス", "ウィーアー", "オールジョブ", "FC", "本部HP", "その他"];
@@ -67,11 +122,32 @@ const isVisited = (d) => d.status === STATUS.REVISIT || d.status === STATUS.WON 
 const isDecided = (d) => d.status === STATUS.WON || d.status === STATUS.LOST;
 
 const uid = () => Math.random().toString(36).slice(2, 10);
+const activeRepsForMonth = (data, monthStr) => {
+  const resignedMap = data.repResignedMonth || {};
+  return data.reps.filter((r) => {
+    const resigned = resignedMap[r];
+    return !resigned || monthStr <= resigned;
+  });
+};
 const pct = (n) => (isFinite(n) ? `${(n * 100).toFixed(1)}%` : "—");
 const today = () => new Date().toISOString().slice(0, 10);
 const openPicker = (e) => { try { e.target.showPicker && e.target.showPicker(); } catch (err) {} };
 
 const monthKey = (dateStr) => (dateStr ? dateStr.slice(0, 7) : "");
+const periodMonthKey = (period) => {
+  if (!period || period.value === "all") return null;
+  if (period.type === "week" || period.type === "day") return monthKey(period.value);
+  return period.value;
+};
+const visibleRepsForPeriod = (data, period) => {
+  const pMonth = periodMonthKey(period);
+  if (pMonth === null) return data.reps;
+  const resignedMap = data.repResignedMonth || {};
+  return data.reps.filter((r) => {
+    const resigned = resignedMap[r];
+    return !resigned || pMonth <= resigned;
+  });
+};
 const inMonth = (dateStr, month) => (month === "all" ? true : monthKey(dateStr) === month);
 const monthLabel = (month) => {
   if (month === "all") return "全期間";
@@ -194,8 +270,9 @@ export default function App() {
   const [tab, setTab] = useState("home");
   const [toast, setToast] = useState("");
   const [periodType, setPeriodType] = useState("month");
-  const [periodValue, setPeriodValue] = useState("all");
+  const [periodValue, setPeriodValue] = useState(currentMonthStr());
   const [office, setOffice] = useState("osaka");
+  const [overallUnlocked, setOverallUnlocked] = useState(false);
   const [connError, setConnError] = useState(false);
   const savingRef = useRef(false);
 
@@ -250,10 +327,16 @@ export default function App() {
 
   const period = useMemo(() => ({ type: periodType, value: periodValue }), [periodType, periodValue]);
   const stats = useMemo(
-    () => (data ? calcStats(data.reps, data.calls, data.deals, period) : []),
+    () => (data ? calcStats(visibleRepsForPeriod(data, period), data.calls, data.deals, period) : []),
     [data, period]
   );
-  const periodOptions = useMemo(() => (data ? availablePeriods(data, periodType) : []), [data, periodType]);
+  const periodOptions = useMemo(() => {
+    const base = data ? availablePeriods(data, periodType) : [];
+    if (periodValue !== "all" && !base.includes(periodValue)) {
+      return [periodValue, ...base].sort().reverse();
+    }
+    return base;
+  }, [data, periodType, periodValue]);
 
   const handlePeriodTypeChange = (type) => {
     setPeriodType(type);
@@ -288,7 +371,7 @@ export default function App() {
               <button
                 key={key}
                 className={"office-toggle-btn" + (office === key ? " active" : "")}
-                onClick={() => { setOffice(key); setTab("home"); setPeriodValue("all"); }}
+                onClick={() => { setOffice(key); setTab("home"); setPeriodType("month"); setPeriodValue(currentMonthStr()); setOverallUnlocked(false); }}
               >
                 {o.label}
               </button>
@@ -307,6 +390,8 @@ export default function App() {
             ["deals", "アポ・商談"],
             ["reps", "営業メンバー"],
             ["payments", "入金管理"],
+            ["overallpayments", office === "tokyo" ? "東京AI課全体入金管理" : "大阪全体入金管理"],
+            ["budget", "予算管理"],
             ["invoices", "請求書管理"],
             ["banktransfer", "口座振替管理"],
             ["unpaid", "未収管理"],
@@ -340,6 +425,16 @@ export default function App() {
           {tab === "deals" && <DealsTab data={data} persist={persist} flash={flash} />}
           {tab === "reps" && <RepsTab data={data} persist={persist} flash={flash} />}
           {tab === "payments" && <PaymentsTab data={data} persist={persist} flash={flash} />}
+          {tab === "overallpayments" && (
+            <OverallPaymentsTab
+              data={data}
+              persist={persist}
+              unlocked={overallUnlocked}
+              onUnlock={() => setOverallUnlocked(true)}
+              office={office}
+            />
+          )}
+          {tab === "budget" && <BudgetTab data={data} persist={persist} />}
           {tab === "invoices" && <InvoiceTab data={data} persist={persist} />}
           {tab === "banktransfer" && <BankTransferTab data={data} persist={persist} />}
           {tab === "unpaid" && <UnpaidTab data={data} persist={persist} flash={flash} />}
@@ -751,16 +846,17 @@ function StrategyTab({ data, persist }) {
 
 // ---------- Calls Tab ----------
 function CallsTab({ data, persist, flash }) {
-  const [rep, setRep] = useState(data.reps[0] || "");
   const [date, setDate] = useState(today());
+  const activeList = activeRepsForMonth(data, monthKey(date));
+  const [rep, setRep] = useState(activeList[0] || "");
   const [count, setCount] = useState("");
   const [decisionMakers, setDecisionMakers] = useState("");
   const [scheduleSet, setScheduleSet] = useState("");
 
   useEffect(() => {
-    if (!data.reps.includes(rep)) setRep(data.reps[0] || "");
+    if (!activeList.includes(rep)) setRep(activeList[0] || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.reps]);
+  }, [data.reps, data.repResignedMonth, date]);
 
   const add = () => {
     if (!rep) return flash("営業メンバーを選択してください");
@@ -792,7 +888,7 @@ function CallsTab({ data, persist, flash }) {
         <div className="form-row">
           <label>営業</label>
           <select value={rep} onChange={(e) => setRep(e.target.value)}>
-            {data.reps.map((r) => <option key={r} value={r}>{r}</option>)}
+            {activeList.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
         </div>
         <div className="form-row">
@@ -854,8 +950,9 @@ function CallsTab({ data, persist, flash }) {
 // ---------- Deals Tab (アポ・商談) ----------
 function DealsTab({ data, persist, flash }) {
   const [company, setCompany] = useState("");
-  const [apoRep, setApoRep] = useState(data.reps[0] || "");
   const [apoDate, setApoDate] = useState(today());
+  const activeList = activeRepsForMonth(data, monthKey(apoDate));
+  const [apoRep, setApoRep] = useState(activeList[0] || "");
   const [apptDate, setApptDate] = useState("");
   const [product, setProduct] = useState(PRODUCTS[0]);
   const [filterRep, setFilterRep] = useState("すべて");
@@ -864,9 +961,9 @@ function DealsTab({ data, persist, flash }) {
   const [filterDate, setFilterDate] = useState("");
 
   useEffect(() => {
-    if (!data.reps.includes(apoRep)) setApoRep(data.reps[0] || "");
+    if (!activeList.includes(apoRep)) setApoRep(activeList[0] || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.reps]);
+  }, [data.reps, data.repResignedMonth, apoDate]);
 
   const addDeal = () => {
     if (!company.trim()) return flash("企業名を入力してください");
@@ -908,7 +1005,7 @@ function DealsTab({ data, persist, flash }) {
         <div className="form-row">
           <label>アポ獲得者</label>
           <select value={apoRep} onChange={(e) => setApoRep(e.target.value)}>
-            {data.reps.map((r) => <option key={r} value={r}>{r}</option>)}
+            {activeList.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
         </div>
         <div className="form-row">
@@ -1114,10 +1211,17 @@ function RepsTab({ data, persist, flash }) {
     persist({ ...data, repRoles: { ...(data.repRoles || {}), [n]: role } });
   };
 
+  const setResignedMonth = (n, value) => {
+    const rm = { ...(data.repResignedMonth || {}) };
+    if (value) rm[n] = value;
+    else delete rm[n];
+    persist({ ...data, repResignedMonth: rm });
+  };
+
   return (
     <div className="tab-panel">
       <section className="panel form-panel">
-        <h2>営業メンバー登録</h2>
+        <h2>営業メンバー登録<span className="hint">退職したメンバーも、過去のデータ入力用にそのまま追加できます</span></h2>
         <div className="form-row">
           <label>氏名</label>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="例）田中" onKeyDown={(e) => e.key === "Enter" && add()} />
@@ -1126,26 +1230,41 @@ function RepsTab({ data, persist, flash }) {
       </section>
 
       <section className="panel">
-        <h2>メンバー一覧<span className="hint">(名前をクリックして修正できます)</span></h2>
+        <h2>メンバー一覧<span className="hint">(名前をクリックして修正できます。退職月を設定すると、翌月以降の新規入力欄に出なくなります)</span></h2>
         <ul className="rep-list">
-          {data.reps.map((r) => (
-            <li key={r}>
-              <input
-                className="rep-name-input"
-                defaultValue={r}
-                onBlur={(e) => rename(r, e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
-              />
-              <select
-                className="rep-role-select"
-                value={(data.repRoles && data.repRoles[r]) || "一般"}
-                onChange={(e) => setRole(r, e.target.value)}
-              >
-                {REP_ROLES.map((role) => <option key={role} value={role}>{role}</option>)}
-              </select>
-              <button className="text-btn danger" onClick={() => remove(r)}>削除</button>
-            </li>
-          ))}
+          {data.reps.map((r) => {
+            const resignedMonth = (data.repResignedMonth && data.repResignedMonth[r]) || "";
+            return (
+              <li key={r} className={resignedMonth ? "rep-inactive" : ""}>
+                <input
+                  className="rep-name-input"
+                  defaultValue={r}
+                  onBlur={(e) => rename(r, e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
+                />
+                <select
+                  className="rep-role-select"
+                  value={(data.repRoles && data.repRoles[r]) || "一般"}
+                  onChange={(e) => setRole(r, e.target.value)}
+                >
+                  {REP_ROLES.map((role) => <option key={role} value={role}>{role}</option>)}
+                </select>
+                <label className="rep-inactive-toggle">
+                  退職月
+                  <input
+                    type="month"
+                    value={resignedMonth}
+                    onChange={(e) => setResignedMonth(r, e.target.value)}
+                    onClick={openPicker}
+                  />
+                  {resignedMonth && (
+                    <button className="text-btn" onClick={() => setResignedMonth(r, "")}>解除</button>
+                  )}
+                </label>
+                <button className="text-btn danger" onClick={() => remove(r)}>削除</button>
+              </li>
+            );
+          })}
           {data.reps.length === 0 && <li className="empty-row">メンバーが登録されていません</li>}
         </ul>
       </section>
@@ -1158,6 +1277,7 @@ function PaymentsTab({ data, persist, flash }) {
   const [selfRep, setSelfRep] = useState(data.reps[0] || "");
   const [monthStr, setMonthStr] = useState(currentMonthStr());
   const [form, setForm] = useState(emptyPayment());
+  const activeList = activeRepsForMonth(data, monthKey(form.date));
   const [splitWithRep, setSplitWithRep] = useState("");
   const [splitPoints, setSplitPoints] = useState("");
   const [splitExpectedPoints, setSplitExpectedPoints] = useState("");
@@ -1382,14 +1502,14 @@ function PaymentsTab({ data, persist, flash }) {
               <label>営業した人</label>
               <select value={form.salesRep} onChange={(e) => setField("salesRep", e.target.value)}>
                 <option value="">選択</option>
-                {data.reps.map((r) => <option key={r} value={r}>{r}</option>)}
+                {activeList.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
             <div className="form-row">
               <label>折半Pを付ける人</label>
               <select value={splitWithRep} onChange={(e) => setSplitWithRep(e.target.value)}>
                 <option value="">なし</option>
-                {data.reps.filter((r) => r !== form.salesRep).map((r) => <option key={r} value={r}>{r}</option>)}
+                {activeList.filter((r) => r !== form.salesRep).map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
             {splitWithRep && (
@@ -1789,6 +1909,864 @@ function PaymentRow({ p, reps, onUpdate, onRemove }) {
   );
 }
 
+function OverallPaymentRow({ p, reps, onUpdate, onRemove }) {
+  const creditTotal = Number(p.creditInitial || 0) + Number(p.creditInstallment || 0);
+  const setPayDate = (i, value) => {
+    const arr = [...(p.paymentDates || ["", "", "", ""])];
+    arr[i] = value;
+    onUpdate({ paymentDates: arr });
+  };
+  const setPayAmount = (i, value) => {
+    const arr = [...(p.paymentAmounts || ["", "", "", ""])];
+    arr[i] = value;
+    onUpdate({ paymentAmounts: arr });
+  };
+  return (
+    <tr>
+      <td><input type="date" value={p.date} onChange={(e) => onUpdate({ date: e.target.value })} onClick={openPicker} /></td>
+      <td>
+        <input
+          className="company-input payment-company-input"
+          style={{ fontSize: companyFontSize(p.company) }}
+          value={p.company}
+          onChange={(e) => onUpdate({ company: e.target.value })}
+        />
+      </td>
+      <td>
+        <select value={p.customerType} onChange={(e) => onUpdate({ customerType: e.target.value })}>
+          {CUSTOMER_TYPES.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </td>
+      <td>
+        <select value={p.product} onChange={(e) => onUpdate({ product: e.target.value })}>
+          {MAIN_PRODUCTS.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </td>
+      <td>
+        <div className="sub-product-triple sub-product-triple-cell">
+          {[0, 1, 2].map((i) => {
+            const arr = p.subProducts || [];
+            return (
+              <select
+                key={i}
+                value={arr[i] || ""}
+                onChange={(e) => {
+                  const next = [arr[0] || "", arr[1] || "", arr[2] || ""];
+                  next[i] = e.target.value;
+                  onUpdate({ subProducts: next.filter(Boolean) });
+                }}
+              >
+                <option value="">なし</option>
+                {SUB_PRODUCTS.map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            );
+          })}
+        </div>
+      </td>
+      <td>
+        <select value={p.industry} onChange={(e) => onUpdate({ industry: e.target.value })}>
+          {INDUSTRIES.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </td>
+      <td>
+        <select value={p.element} onChange={(e) => onUpdate({ element: e.target.value })}>
+          {ELEMENTS.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </td>
+      <td><input type="text" inputMode="numeric" className="num-input" value={formatNum(p.initialFee)} onChange={(e) => onUpdate({ initialFee: parseNum(e.target.value) })} /></td>
+      <td><input type="text" inputMode="numeric" className="num-input" value={formatNum(p.monthlyFee)} onChange={(e) => onUpdate({ monthlyFee: parseNum(e.target.value) })} /></td>
+      <td>
+        <select value={p.paymentMethod} onChange={(e) => onUpdate({ paymentMethod: e.target.value })}>
+          {PAYMENT_METHODS.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </td>
+      <td><input type="text" inputMode="numeric" className="num-input" value={formatNum(p.creditInitial)} onChange={(e) => onUpdate({ creditInitial: parseNum(e.target.value) })} /></td>
+      <td><input type="text" inputMode="numeric" className="num-input" value={formatNum(p.creditInstallment)} onChange={(e) => onUpdate({ creditInstallment: parseNum(e.target.value) })} /></td>
+      <td className="num">{formatNum(creditTotal)}</td>
+      <td>
+        <select value={p.maintenanceFee} onChange={(e) => onUpdate({ maintenanceFee: e.target.value })}>
+          <option value="">なし</option>
+          {MAINTENANCE_OPTIONS.map((v) => <option key={v} value={v}>{yen(v)}</option>)}
+        </select>
+      </td>
+      <td>
+        <select value={p.domainFee} onChange={(e) => onUpdate({ domainFee: e.target.value })}>
+          <option value="">なし</option>
+          {DOMAIN_OPTIONS.map((v) => <option key={v} value={v}>{yen(v)}</option>)}
+        </select>
+      </td>
+      <td>
+        <select value={p.phase} onChange={(e) => onUpdate({ phase: e.target.value })}>
+          {PHASES.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </td>
+      <td>
+        <select value={p.contractPeriod} onChange={(e) => onUpdate({ contractPeriod: e.target.value })}>
+          {CONTRACT_PERIODS.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </td>
+      <td>
+        <select value={p.meetingType} onChange={(e) => onUpdate({ meetingType: e.target.value })}>
+          {MEETING_TYPES.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </td>
+      {[0, 1, 2, 3].map((i) => (
+        <Fragment key={i}>
+          <td>
+            <input type="date" value={(p.paymentDates && p.paymentDates[i]) || ""} onChange={(e) => setPayDate(i, e.target.value)} onClick={openPicker} />
+          </td>
+          <td>
+            <input
+              type="text" inputMode="numeric" className="num-input"
+              value={formatNum((p.paymentAmounts && p.paymentAmounts[i]) || "")}
+              onChange={(e) => setPayAmount(i, parseNum(e.target.value))}
+            />
+          </td>
+        </Fragment>
+      ))}
+      <td><input type="month" value={p.deliveryMonth} onChange={(e) => onUpdate({ deliveryMonth: e.target.value })} onClick={openPicker} /></td>
+      <td><input type="number" min="0" className="num-input" value={p.orderPoints} onChange={(e) => onUpdate({ orderPoints: e.target.value })} /></td>
+      <td><input type="number" min="0" className="num-input" value={p.expectedPoints || ""} onChange={(e) => onUpdate({ expectedPoints: e.target.value })} /></td>
+      <td className="rep-cell">{p.salesRep}</td>
+      <td>
+        <select value={p.assignedTo} onChange={(e) => onUpdate({ assignedTo: e.target.value })}>
+          {reps.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+      </td>
+      <td><button className="text-btn danger" onClick={onRemove}>削除</button></td>
+    </tr>
+  );
+}
+
+// ---------- Overall Payments Tab (全体入金管理) ----------
+function OverallPaymentsTab({ data, persist, unlocked, onUnlock, office }) {
+  const [passwordInput, setPasswordInput] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [error, setError] = useState("");
+  const hasPassword = Boolean(data.overallPassword);
+  const pageLabel = office === "tokyo" ? "東京AI課全体入金管理" : "大阪全体入金管理";
+
+  const trySetPassword = () => {
+    if (!newPassword.trim()) return setError("パスワードを入力してください");
+    persist({ ...data, overallPassword: newPassword.trim() });
+    onUnlock();
+  };
+
+  const tryUnlock = () => {
+    if (passwordInput === data.overallPassword) {
+      setError("");
+      setPasswordInput("");
+      onUnlock();
+    } else {
+      setError("パスワードが違います");
+    }
+  };
+
+  if (!unlocked) {
+    return (
+      <div className="tab-panel">
+        <section className="panel lock-panel">
+          {!hasPassword ? (
+            <>
+              <h2>{pageLabel}のパスワードを設定</h2>
+              <p className="data-note">このページは他の入金管理とは別に、独自のパスワードで保護できます。最初に1回だけ設定してください。</p>
+              <div className="form-row">
+                <label>パスワード</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && trySetPassword()}
+                  placeholder="お好きなパスワードを入力"
+                />
+              </div>
+              {error && <p className="lock-error">{error}</p>}
+              <button className="primary-btn" onClick={trySetPassword}>設定して開く</button>
+            </>
+          ) : (
+            <>
+              <h2>🔒 {pageLabel}</h2>
+              <p className="data-note">このページはロックされています。パスワードを入力してください。</p>
+              <div className="form-row">
+                <label>パスワード</label>
+                <input
+                  type="password"
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && tryUnlock()}
+                  placeholder="パスワード"
+                />
+              </div>
+              {error && <p className="lock-error">{error}</p>}
+              <button className="primary-btn" onClick={tryUnlock}>開く</button>
+            </>
+          )}
+        </section>
+      </div>
+    );
+  }
+
+  return <OverallPaymentsContent data={data} persist={persist} pageLabel={pageLabel} />;
+}
+
+function OverallPaymentsContent({ data, persist, pageLabel }) {
+  const [selfRep, setSelfRep] = useState(data.reps[0] || "");
+  const [monthStr, setMonthStr] = useState(currentMonthStr());
+  const [form, setForm] = useState(emptyPayment());
+  const activeList = activeRepsForMonth(data, monthKey(form.date));
+  const [splitWithRep, setSplitWithRep] = useState("");
+  const [splitPoints, setSplitPoints] = useState("");
+  const [splitExpectedPoints, setSplitExpectedPoints] = useState("");
+
+  useEffect(() => {
+    if (!data.reps.includes(selfRep)) setSelfRep(data.reps[0] || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.reps]);
+
+  const role = (data.repRoles && data.repRoles[selfRep]) || "一般";
+  const isManager = role !== "一般";
+  const records = data.overallPayments || [];
+  const targets = data.overallTargets || {};
+
+  const setField = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+  const setSubProductAt = (i, value) => {
+    setForm((f) => {
+      const arr = [f.subProducts[0] || "", f.subProducts[1] || "", f.subProducts[2] || ""];
+      arr[i] = value;
+      return { ...f, subProducts: arr };
+    });
+  };
+  const setPaymentDate = (i, value) => {
+    setForm((f) => {
+      const arr = [...f.paymentDates];
+      arr[i] = value;
+      return { ...f, paymentDates: arr };
+    });
+  };
+  const setPaymentAmount = (i, value) => {
+    setForm((f) => {
+      const arr = [...(f.paymentAmounts || ["", "", "", ""])];
+      arr[i] = value;
+      return { ...f, paymentAmounts: arr };
+    });
+  };
+
+  const addRecord = () => {
+    if (!form.company.trim()) return;
+    if (!form.salesRep) return;
+    const record = {
+      ...form,
+      id: uid(),
+      assignedTo: form.salesRep,
+      subProducts: form.subProducts.filter(Boolean),
+    };
+    const newRecords = [record];
+    if (splitWithRep) {
+      newRecords.push({
+        ...emptyPayment(),
+        id: uid(),
+        date: form.date,
+        salesRep: form.salesRep,
+        assignedTo: splitWithRep,
+        company: form.company,
+        product: "折半P",
+        customerType: form.customerType,
+        deliveryMonth: form.deliveryMonth,
+        orderPoints: splitPoints,
+        expectedPoints: splitExpectedPoints,
+      });
+    }
+    persist({ ...data, overallPayments: [...newRecords, ...records] });
+    setForm(emptyPayment());
+    setSplitWithRep("");
+    setSplitPoints("");
+    setSplitExpectedPoints("");
+  };
+
+  const updateRecord = (id, patch) => {
+    persist({ ...data, overallPayments: records.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
+  };
+  const removeRecord = (id) => {
+    persist({ ...data, overallPayments: records.filter((p) => p.id !== id) });
+  };
+
+  const setTarget = (rep, value) => {
+    const t = { ...targets, [rep]: { ...(targets[rep] || {}), [monthStr]: Number(value) || 0 } };
+    persist({ ...data, overallTargets: t });
+  };
+
+  const currentPFor = (rep) =>
+    roundP(records
+      .filter((p) => p.assignedTo === rep && monthKey(p.date) === monthStr)
+      .reduce((s, p) => s + Number(p.orderPoints || 0), 0));
+  const expectedPFor = (rep) =>
+    roundP(records
+      .filter((p) => p.assignedTo === rep && monthKey(p.date) === monthStr)
+      .reduce((s, p) => s + Number(p.expectedPoints || 0), 0));
+  const targetPFor = (rep) => Number(targets[rep]?.[monthStr] || 0);
+
+  const overallTeams = data.overallMonthlyTeams || {};
+  const myTeams = overallTeams[selfRep] || {};
+  const teamMembers = myTeams[monthStr] || data.reps;
+  const toggleTeamMember = (rep) => {
+    const current = myTeams[monthStr] || data.reps;
+    const next = current.includes(rep) ? current.filter((r) => r !== rep) : [...current, rep];
+    persist({
+      ...data,
+      overallMonthlyTeams: { ...overallTeams, [selfRep]: { ...myTeams, [monthStr]: next } },
+    });
+  };
+
+  const myRecords = records.filter((p) => p.assignedTo === selfRep).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const myTarget = targetPFor(selfRep);
+  const myCurrent = currentPFor(selfRep);
+  const myExpected = expectedPFor(selfRep);
+  const myCombined = roundP(myCurrent + myExpected);
+  const memberTargetSum = roundP(teamMembers.reduce((s, r) => s + targetPFor(r), 0));
+  const teamCurrentTotal = roundP(teamMembers.reduce((s, r) => s + currentPFor(r), 0));
+  const teamExpectedTotal = roundP(teamMembers.reduce((s, r) => s + expectedPFor(r), 0));
+  const teamCombinedTotal = roundP(teamCurrentTotal + teamExpectedTotal);
+
+  return (
+    <div className="tab-panel">
+      <section className="panel">
+        <div className="panel-head-row">
+          <h2>{pageLabel}<span className="hint">以前の入金管理のデータとは連動しない、独自の記録です</span></h2>
+          <div className="filter-group">
+            <select value={selfRep} onChange={(e) => setSelfRep(e.target.value)} className="filter-select">
+              {data.reps.map((r) => <option key={r} value={r}>{r}</option>)}
+              {data.reps.length === 0 && <option value="">メンバー未登録</option>}
+            </select>
+            <input type="month" value={monthStr} onChange={(e) => setMonthStr(e.target.value)} className="filter-select" onClick={openPicker} />
+          </div>
+        </div>
+
+        <div className="kpi-strip payments-kpi-strip">
+          <KpiCard label="役職" value={role} />
+          <KpiCard label={isManager ? "チーム目標P" : "目標P"} value={isManager ? memberTargetSum : myTarget} />
+          <KpiCard
+            label={isManager ? "チーム現状P" : "現状P"}
+            value={isManager ? teamCurrentTotal : myCurrent}
+            accent={
+              isManager
+                ? (memberTargetSum && teamCurrentTotal >= memberTargetSum ? "win" : undefined)
+                : (myTarget && myCurrent >= myTarget ? "win" : undefined)
+            }
+          />
+          <KpiCard label={isManager ? "チーム見込P" : "見込P"} value={isManager ? teamExpectedTotal : myExpected} />
+          <KpiCard label={isManager ? "見込含むチーム現状P" : "見込含む現状P"} value={isManager ? teamCombinedTotal : myCombined} />
+          <KpiCard
+            label={isManager ? "チーム達成率" : "達成率"}
+            value={isManager ? pct(memberTargetSum ? teamCurrentTotal / memberTargetSum : NaN) : pct(myTarget ? myCurrent / myTarget : NaN)}
+          />
+        </div>
+        <div className="form-row" style={{ maxWidth: 320 }}>
+          <label>{selfRep}さん個人の目標P</label>
+          <input
+            type="number" min="0" key={selfRep + monthStr}
+            defaultValue={myTarget || ""}
+            onBlur={(e) => setTarget(selfRep, e.target.value)}
+            placeholder="例）50"
+          />
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>入金記録を追加</h2>
+
+        <div className="payment-section">
+          <h3 className="payment-section-title">① 基本情報</h3>
+          <div className="payment-form-grid">
+            <div className="form-row"><label>日付</label><input type="date" value={form.date} onChange={(e) => setField("date", e.target.value)} onClick={openPicker} /></div>
+            <div className="form-row">
+              <label>営業した人</label>
+              <select value={form.salesRep} onChange={(e) => setField("salesRep", e.target.value)}>
+                <option value="">選択</option>
+                {activeList.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+            <div className="form-row">
+              <label>折半Pを付ける人</label>
+              <select value={splitWithRep} onChange={(e) => setSplitWithRep(e.target.value)}>
+                <option value="">なし</option>
+                {activeList.filter((r) => r !== form.salesRep).map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+            {splitWithRep && (
+              <>
+                <div className="form-row">
+                  <label>折半Pの数</label>
+                  <input type="number" min="0" value={splitPoints} onChange={(e) => setSplitPoints(e.target.value)} placeholder="例）5" />
+                </div>
+                <div className="form-row">
+                  <label>見込折半P<span className="field-hint">（未確定の場合）</span></label>
+                  <input type="number" min="0" value={splitExpectedPoints} onChange={(e) => setSplitExpectedPoints(e.target.value)} placeholder="例）5" />
+                </div>
+              </>
+            )}
+            <div className="form-row">
+              <label>新規/既存</label>
+              <select value={form.customerType} onChange={(e) => setField("customerType", e.target.value)}>
+                {CUSTOMER_TYPES.map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div className="form-row"><label>会社名</label><input value={form.company} onChange={(e) => setField("company", e.target.value)} placeholder="例）株式会社サンプル" style={{ fontSize: companyFontSize(form.company) }} /></div>
+          </div>
+        </div>
+
+        <div className="payment-section">
+          <h3 className="payment-section-title">② 商材</h3>
+          <div className="payment-form-grid">
+            <div className="form-row">
+              <label>商材</label>
+              <select value={form.product} onChange={(e) => setField("product", e.target.value)}>
+                {MAIN_PRODUCTS.map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div className="form-row">
+              <label>業種</label>
+              <select value={form.industry} onChange={(e) => setField("industry", e.target.value)}>
+                {INDUSTRIES.map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div className="form-row">
+              <label>要素</label>
+              <select value={form.element} onChange={(e) => setField("element", e.target.value)}>
+                {ELEMENTS.map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div className="form-row payment-sub-row">
+              <label>副商材<span className="field-hint">（最大3つまで）</span></label>
+              <div className="sub-product-triple">
+                {[0, 1, 2].map((i) => (
+                  <select key={i} value={form.subProducts[i] || ""} onChange={(e) => setSubProductAt(i, e.target.value)}>
+                    <option value="">なし</option>
+                    {SUB_PRODUCTS.map((v) => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="payment-section">
+          <h3 className="payment-section-title">③ 金額・支払い方法</h3>
+          <div className="payment-form-grid">
+            <div className="form-row"><label>初期費用</label><input type="text" inputMode="numeric" value={formatNum(form.initialFee)} onChange={(e) => setField("initialFee", parseNum(e.target.value))} placeholder="円" /></div>
+            <div className="form-row"><label>月額</label><input type="text" inputMode="numeric" value={formatNum(form.monthlyFee)} onChange={(e) => setField("monthlyFee", parseNum(e.target.value))} placeholder="円" /></div>
+            <div className="form-row">
+              <label>保守費用</label>
+              <select value={form.maintenanceFee} onChange={(e) => setField("maintenanceFee", e.target.value)}>
+                <option value="">なし</option>
+                {MAINTENANCE_OPTIONS.map((v) => <option key={v} value={v}>{yen(v)}</option>)}
+              </select>
+            </div>
+            <div className="form-row">
+              <label>ドメイン代</label>
+              <select value={form.domainFee} onChange={(e) => setField("domainFee", e.target.value)}>
+                <option value="">なし</option>
+                {DOMAIN_OPTIONS.map((v) => <option key={v} value={v}>{yen(v)}</option>)}
+              </select>
+            </div>
+            <div className="form-row">
+              <label>支払い方法</label>
+              <select value={form.paymentMethod} onChange={(e) => setField("paymentMethod", e.target.value)}>
+                {PAYMENT_METHODS.map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div className="form-row"><label>クレ初期</label><input type="text" inputMode="numeric" value={formatNum(form.creditInitial)} onChange={(e) => setField("creditInitial", parseNum(e.target.value))} placeholder="円" /></div>
+            <div className="form-row"><label>クレ分</label><input type="text" inputMode="numeric" value={formatNum(form.creditInstallment)} onChange={(e) => setField("creditInstallment", parseNum(e.target.value))} placeholder="円" /></div>
+            <div className="form-row"><label>クレ合計</label><input value={formatNum(Number(form.creditInitial || 0) + Number(form.creditInstallment || 0))} disabled /></div>
+          </div>
+        </div>
+
+        <div className="payment-section">
+          <h3 className="payment-section-title">④ 契約・進捗</h3>
+          <div className="payment-form-grid">
+            <div className="form-row">
+              <label>フェーズ</label>
+              <select value={form.phase} onChange={(e) => setField("phase", e.target.value)}>
+                {PHASES.map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div className="form-row">
+              <label>契約期間</label>
+              <select value={form.contractPeriod} onChange={(e) => setField("contractPeriod", e.target.value)}>
+                {CONTRACT_PERIODS.map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div className="form-row">
+              <label>商談</label>
+              <select value={form.meetingType} onChange={(e) => setField("meetingType", e.target.value)}>
+                {MEETING_TYPES.map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div className="form-row"><label>納品月</label><input type="month" value={form.deliveryMonth} onChange={(e) => setField("deliveryMonth", e.target.value)} onClick={openPicker} /></div>
+            <div className="form-row"><label>受注P</label><input type="number" min="0" value={form.orderPoints} onChange={(e) => setField("orderPoints", e.target.value)} /></div>
+            <div className="form-row"><label>見込P<span className="field-hint">（未確定の場合）</span></label><input type="number" min="0" value={form.expectedPoints} onChange={(e) => setField("expectedPoints", e.target.value)} /></div>
+          </div>
+        </div>
+
+        <div className="payment-section">
+          <h3 className="payment-section-title">⑤ 入金予定日<span className="field-hint">（最大4分割）</span></h3>
+          <div className="payment-form-grid">
+            {form.paymentDates.map((d, i) => (
+              <div className="payment-installment" key={i}>
+                <div className="form-row">
+                  <label>入金日{i + 1}</label>
+                  <input type="date" value={d} onChange={(e) => setPaymentDate(i, e.target.value)} onClick={openPicker} />
+                </div>
+                <div className="form-row">
+                  <label>金額{i + 1}</label>
+                  <input
+                    type="text" inputMode="numeric"
+                    value={formatNum((form.paymentAmounts || [])[i])}
+                    onChange={(e) => setPaymentAmount(i, parseNum(e.target.value))}
+                    placeholder="円"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <button className="primary-btn" onClick={addRecord}>登録する</button>
+      </section>
+
+      <section className="panel">
+        <h2>{selfRep || "―"} さんの入金記録</h2>
+        <div className="table-wrap">
+          <table className="score-table deals-table payments-table">
+            <thead>
+              <tr>
+                <th>日付</th><th>会社名</th><th>新規/既存</th><th>商材</th><th>副商材</th>
+                <th>業種</th><th>要素</th><th>初期費用</th><th>月額</th><th>支払い方法</th>
+                <th>クレ初期</th><th>クレ分</th><th>クレ合計</th><th>保守費用</th><th>ドメイン代</th>
+                <th>フェーズ</th><th>契約期間</th><th>商談</th>
+                <th>入金日1</th><th>金額1</th><th>入金日2</th><th>金額2</th><th>入金日3</th><th>金額3</th><th>入金日4</th><th>金額4</th>
+                <th>納品月</th><th>受注P</th><th>見込P</th><th>営業</th><th>担当</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {myRecords.map((p) => (
+                <OverallPaymentRow key={p.id} p={p} reps={data.reps} onUpdate={(patch) => updateRecord(p.id, patch)} onRemove={() => removeRecord(p.id)} />
+              ))}
+              {myRecords.length === 0 && <tr><td colSpan={32} className="empty-row">記録がありません</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {isManager && (
+        <section className="panel">
+          <h2>{selfRep}チーム（{monthLabel(monthStr)}）<span className="hint">{selfRep}さん専用のチーム管理です</span></h2>
+
+          <div className="team-member-picker">
+            <div className="data-note" style={{ margin: "0 0 8px" }}>この月のチームメンバーを選択（月によってメンバーが変わる場合はここで調整してください）</div>
+            <div className="sub-product-box">
+              {data.reps.map((r) => (
+                <label key={r} className={"sub-product-chip" + (teamMembers.includes(r) ? " chip-active" : "")}>
+                  <input type="checkbox" checked={teamMembers.includes(r)} onChange={() => toggleTeamMember(r)} />
+                  {r}
+                </label>
+              ))}
+              {data.reps.length === 0 && <span className="empty-row">営業メンバーを登録してください</span>}
+            </div>
+          </div>
+
+          <div className="table-wrap">
+            <table className="score-table">
+              <thead><tr><th>営業</th><th>役職</th><th>目標P</th><th>現状P</th><th>達成率</th></tr></thead>
+              <tbody>
+                {teamMembers.map((r) => {
+                  const tp = targetPFor(r);
+                  const cp = currentPFor(r);
+                  return (
+                    <tr key={r}>
+                      <td className="rep-cell">{r}</td>
+                      <td>{(data.repRoles && data.repRoles[r]) || "一般"}</td>
+                      <td className="num">{tp}</td>
+                      <td className="num">{cp}</td>
+                      <td className="num accent">{pct(tp ? cp / tp : NaN)}</td>
+                    </tr>
+                  );
+                })}
+                {teamMembers.length === 0 && <tr><td colSpan={5} className="empty-row">この月のチームメンバーを選択してください</td></tr>}
+                {teamMembers.length > 0 && (
+                  <tr>
+                    <td className="rep-cell">メンバー目標合計</td>
+                    <td></td>
+                    <td className="num">{memberTargetSum}</td>
+                    <td className="num">{teamCurrentTotal}</td>
+                    <td className="num accent">{pct(memberTargetSum ? teamCurrentTotal / memberTargetSum : NaN)}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+
+// ---------- Budget Tab (予算管理) ----------
+function BudgetTab({ data, persist }) {
+  const [monthStr, setMonthStr] = useState(currentMonthStr());
+  const payments = data.overallPayments || [];
+  const budget = data.budget || {};
+  const monthlyTargets = (budget.monthlyTargets || {})[monthStr] || {};
+  const manualItemsByCat = ((budget.manualItems || {})[monthStr]) || {};
+  const autoActuals = computeAutoBudgetActuals(payments, monthStr);
+
+  const manualActualFor = (cat) => roundP((manualItemsByCat[cat] || []).reduce((s, it) => s + Number(it.amount || 0), 0));
+
+  const setMonthlyTarget = (category, value) => {
+    const mt = { ...(budget.monthlyTargets || {}) };
+    mt[monthStr] = { ...(mt[monthStr] || {}), [category]: Number(value) || 0 };
+    persist({ ...data, budget: { ...budget, monthlyTargets: mt } });
+  };
+
+  const updatePaymentField = (id, patch) => {
+    persist({ ...data, overallPayments: payments.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
+  };
+
+  const addManualItem = (category, company, amount) => {
+    const mi = { ...(budget.manualItems || {}) };
+    const forMonth = { ...(mi[monthStr] || {}) };
+    const list = forMonth[category] || [];
+    forMonth[category] = [...list, { id: uid(), company, amount: Number(amount) || 0, delivered: false, mitoko: "無" }];
+    mi[monthStr] = forMonth;
+    persist({ ...data, budget: { ...budget, manualItems: mi } });
+  };
+  const updateManualItem = (category, id, patch) => {
+    const mi = { ...(budget.manualItems || {}) };
+    const forMonth = { ...(mi[monthStr] || {}) };
+    forMonth[category] = (forMonth[category] || []).map((it) => (it.id === id ? { ...it, ...patch } : it));
+    mi[monthStr] = forMonth;
+    persist({ ...data, budget: { ...budget, manualItems: mi } });
+  };
+  const removeManualItem = (category, id) => {
+    const mi = { ...(budget.manualItems || {}) };
+    const forMonth = { ...(mi[monthStr] || {}) };
+    forMonth[category] = (forMonth[category] || []).filter((it) => it.id !== id);
+    mi[monthStr] = forMonth;
+    persist({ ...data, budget: { ...budget, manualItems: mi } });
+  };
+
+  const rows = BUDGET_ALL_CATEGORIES.map((cat) => {
+    const target = Number(monthlyTargets[cat] || 0);
+    const actual = BUDGET_MANUAL_CATEGORIES.includes(cat) ? manualActualFor(cat) : Number(autoActuals[cat] || 0);
+    return { cat, target, actual, diff: roundP(actual - target) };
+  });
+
+  const totalTarget = roundP(BUDGET_TOTAL_CATEGORIES.reduce((s, c) => {
+    const r = rows.find((r) => r.cat === c);
+    return s + (r ? r.target : 0);
+  }, 0));
+  const totalActual = roundP(BUDGET_TOTAL_CATEGORIES.reduce((s, c) => {
+    const r = rows.find((r) => r.cat === c);
+    return s + (r ? r.actual : 0);
+  }, 0));
+  const totalDiff = roundP(totalActual - totalTarget);
+
+  const year = fiscalYearOf(monthStr);
+  const fiscalMonths = fiscalYearMonths(monthStr);
+  let annualTarget = 0;
+  let annualActual = 0;
+  fiscalMonths.forEach((ms) => {
+    const mt = (budget.monthlyTargets || {})[ms] || {};
+    const auto = computeAutoBudgetActuals(payments, ms);
+    const manualForMonth = ((budget.manualItems || {})[ms]) || {};
+    annualTarget += BUDGET_TOTAL_CATEGORIES.reduce((s, c) => s + Number(mt[c] || 0), 0);
+    annualActual += BUDGET_TOTAL_CATEGORIES.reduce((s, c) => {
+      if (BUDGET_MANUAL_CATEGORIES.includes(c)) {
+        return s + roundP((manualForMonth[c] || []).reduce((s2, it) => s2 + Number(it.amount || 0), 0));
+      }
+      return s + Number(auto[c] || 0);
+    }, 0);
+  });
+  annualTarget = roundP(annualTarget);
+  annualActual = roundP(annualActual);
+  const annualDiff = roundP(annualActual - annualTarget);
+
+  const autoItemsFor = (category) =>
+    payments.filter((p) => p.deliveryMonth === monthStr && budgetCategoryFor(p.product) === category);
+
+  return (
+    <div className="tab-panel">
+      <section className="panel">
+        <h2>年間予算（{year}年度：4月〜翌3月）<span className="hint">年間目標は各月の目標の合計です</span></h2>
+        <div className="kpi-strip payments-kpi-strip">
+          <KpiCard label="年間目標" value={yen(annualTarget)} />
+          <KpiCard label="年間実績" value={yen(annualActual)} accent={annualTarget && annualActual >= annualTarget ? "win" : undefined} />
+          <KpiCard label="年間差額" value={yen(annualDiff)} accent={annualDiff >= 0 ? "win" : "lose"} />
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head-row">
+          <h2>月別予算<span className="hint">実績は「大阪全体入金管理」の記録から自動集計します。Addream月額・AddAI月額は企業を手動追加します</span></h2>
+          <input type="month" value={monthStr} onChange={(e) => setMonthStr(e.target.value)} className="filter-select" onClick={openPicker} />
+        </div>
+
+        <div className="kpi-strip payments-kpi-strip">
+          <KpiCard label="月目標合計" value={yen(totalTarget)} />
+          <KpiCard label="月実績合計" value={yen(totalActual)} accent={totalTarget && totalActual >= totalTarget ? "win" : undefined} />
+          <KpiCard label="差額" value={yen(totalDiff)} accent={totalDiff >= 0 ? "win" : "lose"} />
+        </div>
+
+        <div className="table-wrap">
+          <table className="score-table deals-table">
+            <thead>
+              <tr><th>項目</th><th>目標</th><th>実績</th><th>差額</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.cat}>
+                  <td className="rep-cell">
+                    {r.cat}{r.cat === "その他" && <span className="field-hint">（合計にはAddream現金として算入）</span>}
+                  </td>
+                  <td>
+                    <input
+                      type="number" min="0" className="num-input"
+                      key={r.cat + monthStr + "-t"}
+                      defaultValue={r.target || ""}
+                      onBlur={(e) => setMonthlyTarget(r.cat, e.target.value)}
+                    />
+                  </td>
+                  <td className="num">{yen(r.actual)}</td>
+                  <td className={r.diff >= 0 ? "num win" : "num lose-text"}>{yen(r.diff)}</td>
+                </tr>
+              ))}
+              <tr>
+                <td className="rep-cell">合計<span className="field-hint">（その他を除く）</span></td>
+                <td className="num">{yen(totalTarget)}</td>
+                <td className="num">{yen(totalActual)}</td>
+                <td className={totalDiff >= 0 ? "num win" : "num lose-text"}>{yen(totalDiff)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {BUDGET_AUTO_CATEGORIES.map((cat) => (
+        <BudgetCategoryDetail
+          key={cat}
+          category={cat}
+          items={autoItemsFor(cat)}
+          isManual={false}
+          onToggleDelivered={(id, val) => updatePaymentField(id, { budgetDelivered: val })}
+          onSetMitoko={(id, val) => updatePaymentField(id, { budgetMitoko: val })}
+        />
+      ))}
+      {BUDGET_MANUAL_CATEGORIES.map((cat) => (
+        <BudgetCategoryDetail
+          key={cat}
+          category={cat}
+          items={manualItemsByCat[cat] || []}
+          isManual={true}
+          onAdd={(company, amount) => addManualItem(cat, company, amount)}
+          onUpdate={(id, patch) => updateManualItem(cat, id, patch)}
+          onRemove={(id) => removeManualItem(cat, id)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function BudgetCategoryDetail({ category, items, isManual, onToggleDelivered, onSetMitoko, onAdd, onUpdate, onRemove }) {
+  const [company, setCompany] = useState("");
+  const [amount, setAmount] = useState("");
+
+  const submit = () => {
+    if (!company.trim()) return;
+    onAdd(company.trim(), amount);
+    setCompany("");
+    setAmount("");
+  };
+
+  return (
+    <section className="panel">
+      <h2>{category}<span className="hint">会社名・金額・納品チェック・ミトコ申請</span></h2>
+
+      {isManual && (
+        <div className="payment-form-grid" style={{ marginBottom: 12 }}>
+          <div className="form-row">
+            <label>会社名</label>
+            <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="例）株式会社サンプル" />
+          </div>
+          <div className="form-row">
+            <label>金額</label>
+            <input type="text" inputMode="numeric" value={formatNum(amount)} onChange={(e) => setAmount(parseNum(e.target.value))} placeholder="円" />
+          </div>
+          <div className="form-row">
+            <label>&nbsp;</label>
+            <button className="primary-btn" onClick={submit}>追加する</button>
+          </div>
+        </div>
+      )}
+
+      <div className="table-wrap">
+        <table className="score-table deals-table">
+          <thead>
+            <tr><th>会社名</th><th>金額</th><th>納品チェック</th><th>ミトコ申請</th>{isManual && <th></th>}</tr>
+          </thead>
+          <tbody>
+            {items.map((it) => {
+              const delivered = isManual ? !!it.delivered : !!it.budgetDelivered;
+              const mitoko = isManual ? (it.mitoko || "無") : (it.budgetMitoko || "無");
+              const done = delivered && mitoko === "済";
+              return (
+                <tr key={it.id} className={done ? "invoice-received" : ""}>
+                  <td>
+                    {isManual ? (
+                      <input className="company-input" value={it.company} onChange={(e) => onUpdate(it.id, { company: e.target.value })} />
+                    ) : (
+                      it.company
+                    )}
+                  </td>
+                  <td>
+                    {isManual ? (
+                      <input
+                        type="text" inputMode="numeric" className="num-input"
+                        value={formatNum(it.amount)}
+                        onChange={(e) => onUpdate(it.id, { amount: Number(parseNum(e.target.value)) || 0 })}
+                      />
+                    ) : (
+                      <span className="num">{yen(budgetAmountFor(it))}</span>
+                    )}
+                  </td>
+                  <td className="invoice-check-cell">
+                    <input
+                      type="checkbox"
+                      checked={delivered}
+                      onChange={(e) => (isManual ? onUpdate(it.id, { delivered: e.target.checked }) : onToggleDelivered(it.id, e.target.checked))}
+                    />
+                  </td>
+                  <td>
+                    <select
+                      value={mitoko}
+                      onChange={(e) => (isManual ? onUpdate(it.id, { mitoko: e.target.value }) : onSetMitoko(it.id, e.target.value))}
+                    >
+                      {MITOKO_OPTIONS.map((v) => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </td>
+                  {isManual && <td><button className="text-btn danger" onClick={() => onRemove(it.id)}>削除</button></td>}
+                </tr>
+              );
+            })}
+            {items.length === 0 && (
+              <tr><td colSpan={isManual ? 5 : 4} className="empty-row">{isManual ? "企業を追加してください" : "この月・この項目の記録がありません"}</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 // ---------- Invoice Tab (請求書管理) ----------
 function InvoiceTab({ data, persist }) {
   const [monthStr, setMonthStr] = useState("all");
@@ -1969,18 +2947,19 @@ function BankTransferTab({ data, persist }) {
 
 // ---------- Unpaid Tab (未収管理) ----------
 function UnpaidTab({ data, persist, flash }) {
+  const activeList = activeRepsForMonth(data, currentMonthStr());
   const records = data.unpaidRecords || [];
   const [company, setCompany] = useState("");
   const [amount, setAmount] = useState("");
   const [item, setItem] = useState("");
   const [count, setCount] = useState(UNPAID_COUNTS[0]);
   const [dueDate, setDueDate] = useState("");
-  const [rep, setRep] = useState(data.reps[0] || "");
+  const [rep, setRep] = useState(activeList[0] || "");
 
   useEffect(() => {
-    if (!data.reps.includes(rep)) setRep(data.reps[0] || "");
+    if (!activeList.includes(rep)) setRep(activeList[0] || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.reps]);
+  }, [data.reps, data.repResignedMonth]);
 
   const addRecord = () => {
     if (!company.trim()) return flash("企業名を入力してください");
@@ -2016,8 +2995,8 @@ function UnpaidTab({ data, persist, flash }) {
         <div className="form-row">
           <label>担当営業</label>
           <select value={rep} onChange={(e) => setRep(e.target.value)}>
-            {data.reps.map((r) => <option key={r} value={r}>{r}</option>)}
-            {data.reps.length === 0 && <option value="">営業メンバーを登録してください</option>}
+            {activeList.map((r) => <option key={r} value={r}>{r}</option>)}
+            {activeList.length === 0 && <option value="">営業メンバーを登録してください</option>}
           </select>
         </div>
         <div className="form-row">
@@ -2289,6 +3268,9 @@ function StyleBlock() {
       .period-toggle-btn.active { background: var(--amber); color: #FFFFFF; font-weight: 700; }
       .strategy-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
       .data-note { font-size: 12px; color: var(--ink-dim); margin: 0 0 10px; }
+      .lock-panel { max-width: 420px; }
+      .lock-panel .form-row input { width: 100%; }
+      .lock-error { color: #C0392B; font-size: 12px; margin: 4px 0 12px; }
       .payments-kpi-strip { margin-bottom: 16px; }
       .payment-section { margin-bottom: 22px; padding-bottom: 18px; border-bottom: 1px dashed var(--line); }
       .payment-section:last-of-type { border-bottom: none; padding-bottom: 0; margin-bottom: 16px; }
@@ -2349,6 +3331,7 @@ function StyleBlock() {
       .score-table .num { font-family: 'Oswald', sans-serif; }
       .score-table .accent { color: var(--amber); }
       .score-table .win { color: var(--win); }
+      .score-table .lose-text { color: #C0392B; font-weight: 700; }
       .invoice-days { color: #C0392B; font-weight: 700; }
       .invoice-received td { background: #CFEAF2; }
       .invoice-check-cell { text-align: center; }
@@ -2448,6 +3431,11 @@ function StyleBlock() {
       .rep-role-select {
         background: #FBF9F4; border: 1px solid var(--line); color: var(--ink);
         border-radius: 6px; padding: 4px 8px; font-family: inherit; font-size: 12px; margin-right: 8px;
+      }
+      .rep-inactive { opacity: 0.55; }
+      .rep-inactive-toggle {
+        display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-dim);
+        margin-right: 8px; white-space: nowrap;
       }
 
       .toast {
