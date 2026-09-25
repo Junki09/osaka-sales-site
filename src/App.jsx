@@ -16,6 +16,33 @@ const LOSS_REASONS = ["タイミングNG", "決済権なし", "考えたい", "�
 const REP_ROLES = ["一般", "主任", "MG", "課長", "次長"];
 const MAIN_PRODUCTS = ["Addream一括", "Addream月額", "Addreamクレ", "AddAI一括", "AddAI月額", "AddAIクレ", "LP", "Addmovie", "HP", "公式LINE", "engage", "動画単品", "バナー追加", "ペライチ", "meta配信追加", "折半P"];
 
+const productRowClass = (product) => {
+  switch (product) {
+    case "Addream一括":
+    case "Addream月額":
+      return "prow-addream-cash";
+    case "Addreamクレ":
+      return "prow-addream-cred";
+    case "AddAI一括":
+    case "AddAI月額":
+      return "prow-addai-cash";
+    case "AddAIクレ":
+      return "prow-addai-cred";
+    case "LP":
+      return "prow-lp";
+    case "Addmovie":
+      return "prow-addmovie";
+    case "HP":
+      return "prow-hp";
+    case "公式LINE":
+      return "prow-line";
+    case "engage":
+      return "prow-engage";
+    default:
+      return "";
+  }
+};
+
 const BUDGET_AUTO_CATEGORIES = ["Addream現金", "Addreamクレ", "AddAI現金", "AddAIクレ", "LP", "Addmovie", "HP", "その他"];
 const BUDGET_MANUAL_CATEGORIES = ["Addream月額", "AddAI月額"];
 const BUDGET_ALL_CATEGORIES = [...BUDGET_AUTO_CATEGORIES, ...BUDGET_MANUAL_CATEGORIES];
@@ -1404,7 +1431,9 @@ function PaymentsTab({ data, persist, flash }) {
     });
   };
 
-  const myRecords = payments.filter((p) => p.assignedTo === selfRep).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const myRecords = payments
+    .filter((p) => (isManager ? teamMembers.includes(p.assignedTo) : p.assignedTo === selfRep))
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
   const myTarget = targetPFor(selfRep);
   const myCurrent = currentPFor(selfRep);
   const myExpected = expectedPFor(selfRep);
@@ -1686,18 +1715,18 @@ function PaymentsTab({ data, persist, flash }) {
       </section>
 
       <section className="panel">
-        <h2>{selfRep || "―"} さんの入金記録</h2>
+        <h2>{isManager ? `${selfRep || "―"}チームの入金記録` : `${selfRep || "―"} さんの入金記録`}</h2>
         <div className="table-wrap">
           <table className="score-table deals-table payments-table">
             <thead>
               <tr>
-                <th>日付</th><th>会社名</th><th>新規/既存</th><th>商材</th><th>副商材</th>
+                <th>日付</th><th>営業</th><th>担当</th><th>会社名</th><th>新規/既存</th><th>商材</th><th>副商材</th>
                 <th>業種</th><th>要素</th><th>初期費用</th><th>月額</th><th>支払い方法</th>
                 <th>クレ初期</th><th>クレ分</th><th>クレ合計</th><th>保守費用</th><th>ドメイン代</th>
                 <th>フェーズ</th><th>契約期間</th><th>商談</th>
                 <th>入金日1</th><th>金額1</th><th>入金日2</th><th>金額2</th><th>入金日3</th><th>金額3</th><th>入金日4</th><th>金額4</th>
                 <th>口座振替用紙</th><th>振替期日</th><th>HP情報</th>
-                <th>納品月</th><th>受注P</th><th>見込P</th><th>営業</th><th>担当</th><th></th>
+                <th>納品月</th><th>受注P</th><th>見込P</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -1776,8 +1805,14 @@ function PaymentRow({ p, reps, onUpdate, onRemove }) {
     onUpdate({ paymentAmounts: arr });
   };
   return (
-    <tr>
+    <tr className={productRowClass(p.product)}>
       <td><input type="date" value={p.date} onChange={(e) => onUpdate({ date: e.target.value })} onClick={openPicker} /></td>
+      <td className="rep-cell">{p.salesRep}</td>
+      <td>
+        <select value={p.assignedTo} onChange={(e) => onUpdate({ assignedTo: e.target.value })}>
+          {reps.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+      </td>
       <td>
         <input
           className="company-input payment-company-input"
@@ -1898,12 +1933,6 @@ function PaymentRow({ p, reps, onUpdate, onRemove }) {
       <td><input type="month" value={p.deliveryMonth} onChange={(e) => onUpdate({ deliveryMonth: e.target.value })} onClick={openPicker} /></td>
       <td><input type="number" min="0" className="num-input" value={p.orderPoints} onChange={(e) => onUpdate({ orderPoints: e.target.value })} /></td>
       <td><input type="number" min="0" className="num-input" value={p.expectedPoints || ""} onChange={(e) => onUpdate({ expectedPoints: e.target.value })} /></td>
-      <td className="rep-cell">{p.salesRep}</td>
-      <td>
-        <select value={p.assignedTo} onChange={(e) => onUpdate({ assignedTo: e.target.value })}>
-          {reps.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
-      </td>
       <td><button className="text-btn danger" onClick={onRemove}>削除</button></td>
     </tr>
   );
@@ -1922,8 +1951,14 @@ function OverallPaymentRow({ p, reps, onUpdate, onRemove }) {
     onUpdate({ paymentAmounts: arr });
   };
   return (
-    <tr>
+    <tr className={productRowClass(p.product)}>
       <td><input type="date" value={p.date} onChange={(e) => onUpdate({ date: e.target.value })} onClick={openPicker} /></td>
+      <td className="rep-cell">{p.salesRep}</td>
+      <td>
+        <select value={p.assignedTo} onChange={(e) => onUpdate({ assignedTo: e.target.value })}>
+          {reps.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+      </td>
       <td>
         <input
           className="company-input payment-company-input"
@@ -2027,12 +2062,6 @@ function OverallPaymentRow({ p, reps, onUpdate, onRemove }) {
       <td><input type="month" value={p.deliveryMonth} onChange={(e) => onUpdate({ deliveryMonth: e.target.value })} onClick={openPicker} /></td>
       <td><input type="number" min="0" className="num-input" value={p.orderPoints} onChange={(e) => onUpdate({ orderPoints: e.target.value })} /></td>
       <td><input type="number" min="0" className="num-input" value={p.expectedPoints || ""} onChange={(e) => onUpdate({ expectedPoints: e.target.value })} /></td>
-      <td className="rep-cell">{p.salesRep}</td>
-      <td>
-        <select value={p.assignedTo} onChange={(e) => onUpdate({ assignedTo: e.target.value })}>
-          {reps.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
-      </td>
       <td><button className="text-btn danger" onClick={onRemove}>削除</button></td>
     </tr>
   );
@@ -2217,7 +2246,9 @@ function OverallPaymentsContent({ data, persist, pageLabel }) {
     });
   };
 
-  const myRecords = records.filter((p) => p.assignedTo === selfRep).sort((a, b) => (a.date < b.date ? 1 : -1));
+  const myRecords = records
+    .filter((p) => (isManager ? teamMembers.includes(p.assignedTo) : p.assignedTo === selfRep))
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
   const myTarget = targetPFor(selfRep);
   const myCurrent = currentPFor(selfRep);
   const myExpected = expectedPFor(selfRep);
@@ -2434,17 +2465,17 @@ function OverallPaymentsContent({ data, persist, pageLabel }) {
       </section>
 
       <section className="panel">
-        <h2>{selfRep || "―"} さんの入金記録</h2>
+        <h2>{isManager ? `${selfRep || "―"}チームの入金記録` : `${selfRep || "―"} さんの入金記録`}</h2>
         <div className="table-wrap">
           <table className="score-table deals-table payments-table">
             <thead>
               <tr>
-                <th>日付</th><th>会社名</th><th>新規/既存</th><th>商材</th><th>副商材</th>
+                <th>日付</th><th>営業</th><th>担当</th><th>会社名</th><th>新規/既存</th><th>商材</th><th>副商材</th>
                 <th>業種</th><th>要素</th><th>初期費用</th><th>月額</th><th>支払い方法</th>
                 <th>クレ初期</th><th>クレ分</th><th>クレ合計</th><th>保守費用</th><th>ドメイン代</th>
                 <th>フェーズ</th><th>契約期間</th><th>商談</th>
                 <th>入金日1</th><th>金額1</th><th>入金日2</th><th>金額2</th><th>入金日3</th><th>金額3</th><th>入金日4</th><th>金額4</th>
-                <th>納品月</th><th>受注P</th><th>見込P</th><th>営業</th><th>担当</th><th></th>
+                <th>納品月</th><th>受注P</th><th>見込P</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -3334,6 +3365,27 @@ function StyleBlock() {
       .score-table .lose-text { color: #C0392B; font-weight: 700; }
       .invoice-days { color: #C0392B; font-weight: 700; }
       .invoice-received td { background: #CFEAF2; }
+
+      .prow-addream-cash td { background: #F6D6D6; }
+      .prow-addream-cred td { background: #FBEEBF; }
+      .prow-addai-cash td { background: #D3ECF5; }
+      .prow-addai-cred td { background: #C7CEE3; }
+      .prow-lp td { background: #F8D9B8; }
+      .prow-addmovie td { background: #E3D3F0; }
+      .prow-hp td { background: #F6D3E3; }
+      .prow-line td { background: #D3EFD9; }
+      .prow-engage td { background: #E3D0C0; }
+      .prow-addream-cash td input, .prow-addream-cash td select,
+      .prow-addream-cred td input, .prow-addream-cred td select,
+      .prow-addai-cash td input, .prow-addai-cash td select,
+      .prow-addai-cred td input, .prow-addai-cred td select,
+      .prow-lp td input, .prow-lp td select,
+      .prow-addmovie td input, .prow-addmovie td select,
+      .prow-hp td input, .prow-hp td select,
+      .prow-line td input, .prow-line td select,
+      .prow-engage td input, .prow-engage td select {
+        background: transparent;
+      }
       .invoice-check-cell { text-align: center; }
       .score-table .sub { font-family: 'Noto Sans JP'; color: var(--ink-dim); font-size: 11px; }
       .empty-row { text-align: center; color: var(--ink-dim); padding: 20px !important; }
