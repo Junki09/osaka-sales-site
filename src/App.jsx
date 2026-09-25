@@ -3366,15 +3366,15 @@ function StyleBlock() {
       .invoice-days { color: #C0392B; font-weight: 700; }
       .invoice-received td { background: #CFEAF2; }
 
-      .prow-addream-cash td { background: #F6D6D6; }
-      .prow-addream-cred td { background: #FBEEBF; }
-      .prow-addai-cash td { background: #D3ECF5; }
-      .prow-addai-cred td { background: #C7CEE3; }
-      .prow-lp td { background: #F8D9B8; }
-      .prow-addmovie td { background: #E3D3F0; }
-      .prow-hp td { background: #F6D3E3; }
-      .prow-line td { background: #D3EFD9; }
-      .prow-engage td { background: #E3D0C0; }
+      .prow-addream-cash td { background: #F6D6D6 !important; }
+      .prow-addream-cred td { background: #FBEEBF !important; }
+      .prow-addai-cash td { background: #D3ECF5 !important; }
+      .prow-addai-cred td { background: #C7CEE3 !important; }
+      .prow-lp td { background: #F8D9B8 !important; }
+      .prow-addmovie td { background: #E3D3F0 !important; }
+      .prow-hp td { background: #F6D3E3 !important; }
+      .prow-line td { background: #D3EFD9 !important; }
+      .prow-engage td { background: #E3D0C0 !important; }
       .prow-addream-cash td input, .prow-addream-cash td select,
       .prow-addream-cred td input, .prow-addream-cred td select,
       .prow-addai-cash td input, .prow-addai-cash td select,
@@ -3384,7 +3384,7 @@ function StyleBlock() {
       .prow-hp td input, .prow-hp td select,
       .prow-line td input, .prow-line td select,
       .prow-engage td input, .prow-engage td select {
-        background: transparent;
+        background: transparent !important;
       }
       .invoice-check-cell { text-align: center; }
       .score-table .sub { font-family: 'Noto Sans JP'; color: var(--ink-dim); font-size: 11px; }
