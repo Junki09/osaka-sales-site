@@ -300,14 +300,9 @@ export default function App() {
   const [periodValue, setPeriodValue] = useState(currentMonthStr());
   const [office, setOffice] = useState("osaka");
   const [overallUnlocked, setOverallUnlocked] = useState(false);
+
   const [connError, setConnError] = useState(false);
   const savingRef = useRef(false);
-
-  const flash = (msg) => {
-    setToast(msg);
-    window.clearTimeout(flash._t);
-    flash._t = window.setTimeout(() => setToast(""), 2200);
-  };
 
   useEffect(() => {
     setLoading(true);
@@ -351,6 +346,12 @@ export default function App() {
       flash("保存に失敗しました。通信環境をご確認ください");
     }
   }, [office]);
+
+  const flash = (msg) => {
+    setToast(msg);
+    window.clearTimeout(flash._t);
+    flash._t = window.setTimeout(() => setToast(""), 2200);
+  };
 
   const period = useMemo(() => ({ type: periodType, value: periodValue }), [periodType, periodValue]);
   const stats = useMemo(
@@ -1303,6 +1304,7 @@ function RepsTab({ data, persist, flash }) {
 function PaymentsTab({ data, persist, flash }) {
   const [selfRep, setSelfRep] = useState(data.reps[0] || "");
   const [monthStr, setMonthStr] = useState(currentMonthStr());
+  const [recordsMonth, setRecordsMonth] = useState(currentMonthStr());
   const [form, setForm] = useState(emptyPayment());
   const activeList = activeRepsForMonth(data, monthKey(form.date));
   const [splitWithRep, setSplitWithRep] = useState("");
@@ -1431,9 +1433,14 @@ function PaymentsTab({ data, persist, flash }) {
     });
   };
 
-  const myRecords = payments
+  const allMyRecords = payments
     .filter((p) => (isManager ? teamMembers.includes(p.assignedTo) : p.assignedTo === selfRep))
     .sort((a, b) => (a.date < b.date ? 1 : -1));
+  const recordsMonthOptions = Array.from(new Set([
+    ...allMyRecords.map((p) => monthKey(p.date)).filter(Boolean),
+    ...(recordsMonth !== "all" ? [recordsMonth] : []),
+  ])).sort().reverse();
+  const myRecords = recordsMonth === "all" ? allMyRecords : allMyRecords.filter((p) => monthKey(p.date) === recordsMonth);
   const myTarget = targetPFor(selfRep);
   const myCurrent = currentPFor(selfRep);
   const myExpected = expectedPFor(selfRep);
@@ -1715,7 +1722,13 @@ function PaymentsTab({ data, persist, flash }) {
       </section>
 
       <section className="panel">
-        <h2>{isManager ? `${selfRep || "―"}チームの入金記録` : `${selfRep || "―"} さんの入金記録`}</h2>
+        <div className="panel-head-row">
+          <h2>{isManager ? `${selfRep || "―"}チームの入金記録` : `${selfRep || "―"} さんの入金記録`}</h2>
+          <select value={recordsMonth} onChange={(e) => setRecordsMonth(e.target.value)} className="filter-select">
+            <option value="all">全期間</option>
+            {recordsMonthOptions.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+          </select>
+        </div>
         <div className="table-wrap">
           <table className="score-table deals-table payments-table">
             <thead>
@@ -2141,6 +2154,7 @@ function OverallPaymentsTab({ data, persist, unlocked, onUnlock, office }) {
 function OverallPaymentsContent({ data, persist, pageLabel }) {
   const [selfRep, setSelfRep] = useState(data.reps[0] || "");
   const [monthStr, setMonthStr] = useState(currentMonthStr());
+  const [recordsMonth, setRecordsMonth] = useState(currentMonthStr());
   const [form, setForm] = useState(emptyPayment());
   const activeList = activeRepsForMonth(data, monthKey(form.date));
   const [splitWithRep, setSplitWithRep] = useState("");
@@ -2246,9 +2260,14 @@ function OverallPaymentsContent({ data, persist, pageLabel }) {
     });
   };
 
-  const myRecords = records
+  const allMyRecords = records
     .filter((p) => (isManager ? teamMembers.includes(p.assignedTo) : p.assignedTo === selfRep))
     .sort((a, b) => (a.date < b.date ? 1 : -1));
+  const recordsMonthOptions = Array.from(new Set([
+    ...allMyRecords.map((p) => monthKey(p.date)).filter(Boolean),
+    ...(recordsMonth !== "all" ? [recordsMonth] : []),
+  ])).sort().reverse();
+  const myRecords = recordsMonth === "all" ? allMyRecords : allMyRecords.filter((p) => monthKey(p.date) === recordsMonth);
   const myTarget = targetPFor(selfRep);
   const myCurrent = currentPFor(selfRep);
   const myExpected = expectedPFor(selfRep);
@@ -2465,7 +2484,13 @@ function OverallPaymentsContent({ data, persist, pageLabel }) {
       </section>
 
       <section className="panel">
-        <h2>{isManager ? `${selfRep || "―"}チームの入金記録` : `${selfRep || "―"} さんの入金記録`}</h2>
+        <div className="panel-head-row">
+          <h2>{isManager ? `${selfRep || "―"}チームの入金記録` : `${selfRep || "―"} さんの入金記録`}</h2>
+          <select value={recordsMonth} onChange={(e) => setRecordsMonth(e.target.value)} className="filter-select">
+            <option value="all">全期間</option>
+            {recordsMonthOptions.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+          </select>
+        </div>
         <div className="table-wrap">
           <table className="score-table deals-table payments-table">
             <thead>
