@@ -736,6 +736,36 @@ function HomeTab({ stats, data, period, periodType, periodOptions, onPeriodTypeC
   );
 }
 
+function MonthYearSelect({ value, onChange, placeholder }) {
+  const [y, m] = value ? value.split("-") : ["", ""];
+  const thisYear = new Date().getFullYear();
+  const years = [];
+  for (let yy = thisYear - 10; yy <= thisYear + 10; yy++) years.push(yy);
+  const months = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
+
+  const setYear = (newY) => {
+    if (!newY) return onChange("");
+    onChange(`${newY}-${m || "01"}`);
+  };
+  const setMonth = (newM) => {
+    if (!y) return;
+    onChange(`${y}-${newM}`);
+  };
+
+  return (
+    <span className="month-year-select">
+      <select value={y} onChange={(e) => setYear(e.target.value)}>
+        <option value="">{placeholder || "年"}</option>
+        {years.map((yy) => <option key={yy} value={yy}>{yy}年</option>)}
+      </select>
+      <select value={m} onChange={(e) => setMonth(e.target.value)} disabled={!y}>
+        <option value="">月</option>
+        {months.map((mm) => <option key={mm} value={mm}>{Number(mm)}月</option>)}
+      </select>
+    </span>
+  );
+}
+
 function KpiCard({ label, value, accent }) {
   return (
     <div className={"kpi-card" + (accent ? ` kpi-${accent}` : "")}>
@@ -1279,7 +1309,7 @@ function RepsTab({ data, persist, flash }) {
             const resignedMonth = (data.repResignedMonth && data.repResignedMonth[r]) || "";
             const joinMonth = (data.repJoinMonth && data.repJoinMonth[r]) || "";
             return (
-              <li key={r} className={(resignedMonth || joinMonth) ? "rep-inactive" : ""}>
+              <li key={r} className={resignedMonth ? "rep-inactive" : ""}>
                 <input
                   className="rep-name-input"
                   defaultValue={r}
@@ -1295,24 +1325,14 @@ function RepsTab({ data, persist, flash }) {
                 </select>
                 <label className="rep-inactive-toggle">
                   入社月
-                  <input
-                    type="month"
-                    value={joinMonth}
-                    onChange={(e) => setJoinMonth(r, e.target.value)}
-                    onClick={openPicker}
-                  />
+                  <MonthYearSelect value={joinMonth} onChange={(v) => setJoinMonth(r, v)} />
                   {joinMonth && (
                     <button className="text-btn" onClick={() => setJoinMonth(r, "")}>解除</button>
                   )}
                 </label>
                 <label className="rep-inactive-toggle">
                   退職月
-                  <input
-                    type="month"
-                    value={resignedMonth}
-                    onChange={(e) => setResignedMonth(r, e.target.value)}
-                    onClick={openPicker}
-                  />
+                  <MonthYearSelect value={resignedMonth} onChange={(v) => setResignedMonth(r, v)} />
                   {resignedMonth && (
                     <button className="text-btn" onClick={() => setResignedMonth(r, "")}>解除</button>
                   )}
@@ -1340,9 +1360,10 @@ function PaymentsTab({ data, persist, flash }) {
   const [splitExpectedPoints, setSplitExpectedPoints] = useState("");
 
   useEffect(() => {
-    if (!data.reps.includes(selfRep)) setSelfRep(data.reps[0] || "");
+    const activeNow = activeRepsForMonth(data, monthStr);
+    if (!activeNow.includes(selfRep)) setSelfRep(activeNow[0] || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.reps]);
+  }, [data.reps, data.repJoinMonth, data.repResignedMonth, monthStr]);
 
   const role = (data.repRoles && data.repRoles[selfRep]) || "一般";
   const isManager = role !== "一般";
@@ -1487,8 +1508,8 @@ function PaymentsTab({ data, persist, flash }) {
           <h2>入金管理</h2>
           <div className="filter-group">
             <select value={selfRep} onChange={(e) => setSelfRep(e.target.value)} className="filter-select">
-              {data.reps.map((r) => <option key={r} value={r}>{r}</option>)}
-              {data.reps.length === 0 && <option value="">メンバー未登録</option>}
+              {activeRepsForMonth(data, monthStr).map((r) => <option key={r} value={r}>{r}</option>)}
+              {activeRepsForMonth(data, monthStr).length === 0 && <option value="">この月に在籍しているメンバーがいません</option>}
             </select>
             <input type="month" value={monthStr} onChange={(e) => setMonthStr(e.target.value)} className="filter-select" onClick={openPicker} />
           </div>
@@ -1787,13 +1808,13 @@ function PaymentsTab({ data, persist, flash }) {
           <div className="team-member-picker">
             <div className="data-note" style={{ margin: "0 0 8px" }}>この月のチームメンバーを選択（月によってメンバーが変わる場合はここで調整してください）</div>
             <div className="sub-product-box">
-              {data.reps.map((r) => (
+              {activeRepsForMonth(data, monthStr).map((r) => (
                 <label key={r} className={"sub-product-chip" + (teamMembers.includes(r) ? " chip-active" : "")}>
                   <input type="checkbox" checked={teamMembers.includes(r)} onChange={() => toggleTeamMember(r)} />
                   {r}
                 </label>
               ))}
-              {data.reps.length === 0 && <span className="empty-row">営業メンバーを登録してください</span>}
+              {activeRepsForMonth(data, monthStr).length === 0 && <span className="empty-row">この月に在籍しているメンバーがいません</span>}
             </div>
           </div>
 
@@ -2190,9 +2211,10 @@ function OverallPaymentsContent({ data, persist, pageLabel }) {
   const [splitExpectedPoints, setSplitExpectedPoints] = useState("");
 
   useEffect(() => {
-    if (!data.reps.includes(selfRep)) setSelfRep(data.reps[0] || "");
+    const activeNow = activeRepsForMonth(data, monthStr);
+    if (!activeNow.includes(selfRep)) setSelfRep(activeNow[0] || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.reps]);
+  }, [data.reps, data.repJoinMonth, data.repResignedMonth, monthStr]);
 
   const role = (data.repRoles && data.repRoles[selfRep]) || "一般";
   const isManager = role !== "一般";
@@ -2312,8 +2334,8 @@ function OverallPaymentsContent({ data, persist, pageLabel }) {
           <h2>{pageLabel}<span className="hint">以前の入金管理のデータとは連動しない、独自の記録です</span></h2>
           <div className="filter-group">
             <select value={selfRep} onChange={(e) => setSelfRep(e.target.value)} className="filter-select">
-              {data.reps.map((r) => <option key={r} value={r}>{r}</option>)}
-              {data.reps.length === 0 && <option value="">メンバー未登録</option>}
+              {activeRepsForMonth(data, monthStr).map((r) => <option key={r} value={r}>{r}</option>)}
+              {activeRepsForMonth(data, monthStr).length === 0 && <option value="">この月に在籍しているメンバーがいません</option>}
             </select>
             <input type="month" value={monthStr} onChange={(e) => setMonthStr(e.target.value)} className="filter-select" onClick={openPicker} />
           </div>
@@ -2548,13 +2570,13 @@ function OverallPaymentsContent({ data, persist, pageLabel }) {
           <div className="team-member-picker">
             <div className="data-note" style={{ margin: "0 0 8px" }}>この月のチームメンバーを選択（月によってメンバーが変わる場合はここで調整してください）</div>
             <div className="sub-product-box">
-              {data.reps.map((r) => (
+              {activeRepsForMonth(data, monthStr).map((r) => (
                 <label key={r} className={"sub-product-chip" + (teamMembers.includes(r) ? " chip-active" : "")}>
                   <input type="checkbox" checked={teamMembers.includes(r)} onChange={() => toggleTeamMember(r)} />
                   {r}
                 </label>
               ))}
-              {data.reps.length === 0 && <span className="empty-row">営業メンバーを登録してください</span>}
+              {activeRepsForMonth(data, monthStr).length === 0 && <span className="empty-row">この月に在籍しているメンバーがいません</span>}
             </div>
           </div>
 
@@ -3541,6 +3563,11 @@ function StyleBlock() {
       .rep-inactive-toggle {
         display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-dim);
         margin-right: 8px; white-space: nowrap;
+      }
+      .month-year-select { display: inline-flex; gap: 4px; }
+      .month-year-select select {
+        background: #FBF9F4; border: 1px solid var(--line); color: var(--ink);
+        border-radius: 6px; padding: 2px 4px; font-family: inherit; font-size: 12px;
       }
 
       .toast {
