@@ -150,10 +150,14 @@ const isDecided = (d) => d.status === STATUS.WON || d.status === STATUS.LOST;
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 const activeRepsForMonth = (data, monthStr) => {
+  const joinMap = data.repJoinMonth || {};
   const resignedMap = data.repResignedMonth || {};
   return data.reps.filter((r) => {
+    const joined = joinMap[r];
     const resigned = resignedMap[r];
-    return !resigned || monthStr <= resigned;
+    if (joined && monthStr < joined) return false;
+    if (resigned && monthStr > resigned) return false;
+    return true;
   });
 };
 const pct = (n) => (isFinite(n) ? `${(n * 100).toFixed(1)}%` : "—");
@@ -168,11 +172,15 @@ const periodMonthKey = (period) => {
 };
 const visibleRepsForPeriod = (data, period) => {
   const pMonth = periodMonthKey(period);
-  if (pMonth === null) return data.reps;
+  const joinMap = data.repJoinMonth || {};
   const resignedMap = data.repResignedMonth || {};
+  const refMonthForJoin = pMonth === null ? currentMonthStr() : pMonth;
   return data.reps.filter((r) => {
+    const joined = joinMap[r];
     const resigned = resignedMap[r];
-    return !resigned || pMonth <= resigned;
+    if (joined && refMonthForJoin < joined) return false;
+    if (pMonth !== null && resigned && pMonth > resigned) return false;
+    return true;
   });
 };
 const inMonth = (dateStr, month) => (month === "all" ? true : monthKey(dateStr) === month);
@@ -1246,6 +1254,13 @@ function RepsTab({ data, persist, flash }) {
     persist({ ...data, repResignedMonth: rm });
   };
 
+  const setJoinMonth = (n, value) => {
+    const jm = { ...(data.repJoinMonth || {}) };
+    if (value) jm[n] = value;
+    else delete jm[n];
+    persist({ ...data, repJoinMonth: jm });
+  };
+
   return (
     <div className="tab-panel">
       <section className="panel form-panel">
@@ -1258,12 +1273,13 @@ function RepsTab({ data, persist, flash }) {
       </section>
 
       <section className="panel">
-        <h2>メンバー一覧<span className="hint">(名前をクリックして修正できます。退職月を設定すると、翌月以降の新規入力欄に出なくなります)</span></h2>
+        <h2>メンバー一覧<span className="hint">(名前をクリックして修正できます。入社月より前・退職月の翌月以降は、実績表や新規入力欄に出なくなります)</span></h2>
         <ul className="rep-list">
           {data.reps.map((r) => {
             const resignedMonth = (data.repResignedMonth && data.repResignedMonth[r]) || "";
+            const joinMonth = (data.repJoinMonth && data.repJoinMonth[r]) || "";
             return (
-              <li key={r} className={resignedMonth ? "rep-inactive" : ""}>
+              <li key={r} className={(resignedMonth || joinMonth) ? "rep-inactive" : ""}>
                 <input
                   className="rep-name-input"
                   defaultValue={r}
@@ -1277,6 +1293,18 @@ function RepsTab({ data, persist, flash }) {
                 >
                   {REP_ROLES.map((role) => <option key={role} value={role}>{role}</option>)}
                 </select>
+                <label className="rep-inactive-toggle">
+                  入社月
+                  <input
+                    type="month"
+                    value={joinMonth}
+                    onChange={(e) => setJoinMonth(r, e.target.value)}
+                    onClick={openPicker}
+                  />
+                  {joinMonth && (
+                    <button className="text-btn" onClick={() => setJoinMonth(r, "")}>解除</button>
+                  )}
+                </label>
                 <label className="rep-inactive-toggle">
                   退職月
                   <input
@@ -1423,7 +1451,7 @@ function PaymentsTab({ data, persist, flash }) {
 
   const monthlyTeams = data.monthlyTeams || {};
   const myTeams = monthlyTeams[selfRep] || {};
-  const teamMembers = myTeams[monthStr] || data.reps;
+  const teamMembers = myTeams[monthStr] || activeRepsForMonth(data, monthStr);
   const toggleTeamMember = (rep) => {
     const current = myTeams[monthStr] || data.reps;
     const next = current.includes(rep) ? current.filter((r) => r !== rep) : [...current, rep];
@@ -2250,7 +2278,7 @@ function OverallPaymentsContent({ data, persist, pageLabel }) {
 
   const overallTeams = data.overallMonthlyTeams || {};
   const myTeams = overallTeams[selfRep] || {};
-  const teamMembers = myTeams[monthStr] || data.reps;
+  const teamMembers = myTeams[monthStr] || activeRepsForMonth(data, monthStr);
   const toggleTeamMember = (rep) => {
     const current = myTeams[monthStr] || data.reps;
     const next = current.includes(rep) ? current.filter((r) => r !== rep) : [...current, rep];
