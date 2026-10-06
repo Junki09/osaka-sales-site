@@ -14,7 +14,7 @@ const PRODUCTS = ["addream", "AddAI"];
 const LOSS_REASONS = ["タイミングNG", "決済権なし", "考えたい", "誰かに相談必須", "費用感", "ニーズなし", "他社の話も聞きたい", "他社でやってる", "成果報酬でないとやらない", "内容刺さらず", "その他"];
 
 const REP_ROLES = ["一般", "主任", "MG", "課長", "次長"];
-const MAIN_PRODUCTS = ["Addream一括", "Addream月額", "Addreamクレ", "AddAI一括", "AddAI月額", "AddAIクレ", "LP", "Addmovie", "HP", "公式LINE", "engage", "動画単品", "バナー追加", "ペライチ", "meta配信追加", "折半P"];
+const MAIN_PRODUCTS = ["Addream一括", "Addream月額", "Addreamクレ", "AddAI一括", "AddAI月額", "AddAIクレ", "LP", "Addmovie", "HP", "AI用HP", "公式LINE", "engage", "動画単品", "バナー追加", "ペライチ", "meta配信追加", "パスP", "折半P"];
 
 const productRowClass = (product) => {
   switch (product) {
@@ -42,6 +42,13 @@ const productRowClass = (product) => {
       return "";
   }
 };
+
+const PASS_P_VALUE = 0.5;
+const blankSplits = () => [
+  { rep: "", points: "", expected: "" },
+  { rep: "", points: "", expected: "" },
+];
+const PASS_P_TYPES = ["パスP", "見込"];
 
 const BUDGET_AUTO_CATEGORIES = ["Addream現金", "Addreamクレ", "AddAI現金", "AddAIクレ", "LP", "Addmovie", "HP", "その他"];
 const BUDGET_MANUAL_CATEGORIES = ["Addream月額", "AddAI月額"];
@@ -101,7 +108,7 @@ const SUB_PRODUCTS = ["Addream", "AddAI", "LP", "HP", "Addmovie", "公式LINE", 
 const INDUSTRIES = ["不動産", "建築・リフォーム", "運送・軽貨物", "塗装", "福祉", "塾", "買取", "不用品回収", "清掃", "士業", "医療", "警備", "製造業", "その他"];
 const ELEMENTS = ["SK", "RM", "シェア", "NSS", "サングローブ", "イツザイ", "ファインズ", "エンジョイ", "リカオン", "ブラニュー", "EF", "アイフラッグ", "スフィーダクロス", "ウィーアー", "オールジョブ", "FC", "本部HP", "その他"];
 const PAYMENT_METHODS = ["現金", "クレカ", "アプラス", "タイヘイ", "アイフル", "BP", "アプラス審査待ち", "タイヘイ審査待ち", "アイフル審査待ち", "BP審査待ち"];
-const MAINTENANCE_OPTIONS = ["3300", "5500"];
+const MAINTENANCE_OPTIONS = ["3300", "5500", "8800", "11000"];
 const DOMAIN_OPTIONS = ["550"];
 const yen = (v) => `${Number(v).toLocaleString()}円`;
 const roundP = (n) => Math.round(n * 100) / 100;
@@ -1355,9 +1362,17 @@ function PaymentsTab({ data, persist, flash }) {
   const [recordsMonth, setRecordsMonth] = useState(currentMonthStr());
   const [form, setForm] = useState(emptyPayment());
   const activeList = activeRepsForMonth(data, monthKey(form.date));
-  const [splitWithRep, setSplitWithRep] = useState("");
-  const [splitPoints, setSplitPoints] = useState("");
-  const [splitExpectedPoints, setSplitExpectedPoints] = useState("");
+  const [splits, setSplits] = useState(blankSplits());
+  const setSplitField = (i, key, value) => {
+    setSplits((prev) => {
+      const next = prev.map((sp) => ({ ...sp }));
+      next[i][key] = value;
+      if (i === 0 && key === "rep" && !value) next[1] = { rep: "", points: "", expected: "" };
+      return next;
+    });
+  };
+  const [passWithRep, setPassWithRep] = useState("");
+  const [passType, setPassType] = useState(PASS_P_TYPES[0]);
 
   useEffect(() => {
     const activeNow = activeRepsForMonth(data, monthStr);
@@ -1396,7 +1411,7 @@ function PaymentsTab({ data, persist, flash }) {
   const addRecord = () => {
     if (!form.company.trim()) return flash("会社名を入力してください");
     if (!form.salesRep) return flash("営業した人を選択してください");
-    if (splitWithRep && !splitPoints && !splitExpectedPoints) return flash("折半Pまたは見込折半Pの数を入力してください");
+    if (splits.some((sp) => sp.rep && !sp.points && !sp.expected)) return flash("折半Pまたは見込折半Pを入力してください");
     const record = {
       ...form,
       id: uid(),
@@ -1404,27 +1419,43 @@ function PaymentsTab({ data, persist, flash }) {
       subProducts: form.subProducts.filter(Boolean),
     };
     const newRecords = [record];
-    if (splitWithRep) {
+    splits.filter((sp) => sp.rep).forEach((sp) => {
       newRecords.push({
         ...emptyPayment(),
         id: uid(),
         date: form.date,
         salesRep: form.salesRep,
-        assignedTo: splitWithRep,
+        assignedTo: sp.rep,
         company: form.company,
         product: "折半P",
         customerType: form.customerType,
         deliveryMonth: form.deliveryMonth,
-        orderPoints: splitPoints,
-        expectedPoints: splitExpectedPoints,
+        orderPoints: sp.points,
+        expectedPoints: sp.expected,
+      });
+    });
+    if (passWithRep) {
+      newRecords.push({
+        ...emptyPayment(),
+        id: uid(),
+        date: form.date,
+        salesRep: form.salesRep,
+        assignedTo: passWithRep,
+        company: form.company,
+        product: "パスP",
+        customerType: form.customerType,
+        deliveryMonth: form.deliveryMonth,
+        orderPoints: passType === "パスP" ? PASS_P_VALUE : "",
+        expectedPoints: passType === "見込" ? PASS_P_VALUE : "",
       });
     }
     persist({ ...data, payments: [...newRecords, ...payments] });
     setForm(emptyPayment());
-    setSplitWithRep("");
-    setSplitPoints("");
-    setSplitExpectedPoints("");
-    flash(splitWithRep ? "登録しました（折半Pも自動登録しました）" : "登録しました");
+    setSplits(blankSplits());
+    setPassWithRep("");
+    setPassType(PASS_P_TYPES[0]);
+    const autoParts = [splits[0].rep && "折半P", passWithRep && "パスP"].filter(Boolean);
+    flash(autoParts.length ? `登録しました（${autoParts.join("・")}も自動登録しました）` : "登録しました");
   };
 
   const updateRecord = (id, patch) => {
@@ -1590,24 +1621,47 @@ function PaymentsTab({ data, persist, flash }) {
                 {activeList.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
+            {[0, 1].map((i) => {
+              if (i === 1 && !splits[0].rep) return null;
+              const other = splits[1 - i].rep;
+              return (
+                <Fragment key={i}>
+                  <div className="form-row">
+                    <label>{i === 0 ? "折半Pを付ける人" : "折半Pを付ける人（2人目）"}</label>
+                    <select value={splits[i].rep} onChange={(e) => setSplitField(i, "rep", e.target.value)}>
+                      <option value="">なし</option>
+                      {activeList.filter((r) => r !== form.salesRep && r !== other).map((r) => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  {splits[i].rep && (
+                    <>
+                      <div className="form-row">
+                        <label>折半P</label>
+                        <input type="number" min="0" value={splits[i].points} onChange={(e) => setSplitField(i, "points", e.target.value)} placeholder="例）5" />
+                      </div>
+                      <div className="form-row">
+                        <label>見込折半P<span className="field-hint">（未確定の場合）</span></label>
+                        <input type="number" min="0" value={splits[i].expected} onChange={(e) => setSplitField(i, "expected", e.target.value)} placeholder="例）5" />
+                      </div>
+                    </>
+                  )}
+                </Fragment>
+              );
+            })}
             <div className="form-row">
-              <label>折半Pを付ける人</label>
-              <select value={splitWithRep} onChange={(e) => setSplitWithRep(e.target.value)}>
+              <label>パスPを付ける人</label>
+              <select value={passWithRep} onChange={(e) => setPassWithRep(e.target.value)}>
                 <option value="">なし</option>
                 {activeList.filter((r) => r !== form.salesRep).map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
-            {splitWithRep && (
-              <>
-                <div className="form-row">
-                  <label>折半Pの数</label>
-                  <input type="number" min="0" value={splitPoints} onChange={(e) => setSplitPoints(e.target.value)} placeholder="例）5" />
-                </div>
-                <div className="form-row">
-                  <label>見込折半P<span className="field-hint">（未確定の場合）</span></label>
-                  <input type="number" min="0" value={splitExpectedPoints} onChange={(e) => setSplitExpectedPoints(e.target.value)} placeholder="例）5" />
-                </div>
-              </>
+            {passWithRep && (
+              <div className="form-row">
+                <label>パスPの区分<span className="field-hint">（{PASS_P_VALUE}P固定）</span></label>
+                <select value={passType} onChange={(e) => setPassType(e.target.value)}>
+                  {PASS_P_TYPES.map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
             )}
             <div className="form-row">
               <label>新規/既存</label>
@@ -2206,9 +2260,17 @@ function OverallPaymentsContent({ data, persist, pageLabel }) {
   const [recordsMonth, setRecordsMonth] = useState(currentMonthStr());
   const [form, setForm] = useState(emptyPayment());
   const activeList = activeRepsForMonth(data, monthKey(form.date));
-  const [splitWithRep, setSplitWithRep] = useState("");
-  const [splitPoints, setSplitPoints] = useState("");
-  const [splitExpectedPoints, setSplitExpectedPoints] = useState("");
+  const [splits, setSplits] = useState(blankSplits());
+  const setSplitField = (i, key, value) => {
+    setSplits((prev) => {
+      const next = prev.map((sp) => ({ ...sp }));
+      next[i][key] = value;
+      if (i === 0 && key === "rep" && !value) next[1] = { rep: "", points: "", expected: "" };
+      return next;
+    });
+  };
+  const [passWithRep, setPassWithRep] = useState("");
+  const [passType, setPassType] = useState(PASS_P_TYPES[0]);
 
   useEffect(() => {
     const activeNow = activeRepsForMonth(data, monthStr);
@@ -2254,26 +2316,41 @@ function OverallPaymentsContent({ data, persist, pageLabel }) {
       subProducts: form.subProducts.filter(Boolean),
     };
     const newRecords = [record];
-    if (splitWithRep) {
+    splits.filter((sp) => sp.rep).forEach((sp) => {
       newRecords.push({
         ...emptyPayment(),
         id: uid(),
         date: form.date,
         salesRep: form.salesRep,
-        assignedTo: splitWithRep,
+        assignedTo: sp.rep,
         company: form.company,
         product: "折半P",
         customerType: form.customerType,
         deliveryMonth: form.deliveryMonth,
-        orderPoints: splitPoints,
-        expectedPoints: splitExpectedPoints,
+        orderPoints: sp.points,
+        expectedPoints: sp.expected,
+      });
+    });
+    if (passWithRep) {
+      newRecords.push({
+        ...emptyPayment(),
+        id: uid(),
+        date: form.date,
+        salesRep: form.salesRep,
+        assignedTo: passWithRep,
+        company: form.company,
+        product: "パスP",
+        customerType: form.customerType,
+        deliveryMonth: form.deliveryMonth,
+        orderPoints: passType === "パスP" ? PASS_P_VALUE : "",
+        expectedPoints: passType === "見込" ? PASS_P_VALUE : "",
       });
     }
     persist({ ...data, overallPayments: [...newRecords, ...records] });
     setForm(emptyPayment());
-    setSplitWithRep("");
-    setSplitPoints("");
-    setSplitExpectedPoints("");
+    setSplits(blankSplits());
+    setPassWithRep("");
+    setPassType(PASS_P_TYPES[0]);
   };
 
   const updateRecord = (id, patch) => {
@@ -2385,24 +2462,47 @@ function OverallPaymentsContent({ data, persist, pageLabel }) {
                 {activeList.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
+            {[0, 1].map((i) => {
+              if (i === 1 && !splits[0].rep) return null;
+              const other = splits[1 - i].rep;
+              return (
+                <Fragment key={i}>
+                  <div className="form-row">
+                    <label>{i === 0 ? "折半Pを付ける人" : "折半Pを付ける人（2人目）"}</label>
+                    <select value={splits[i].rep} onChange={(e) => setSplitField(i, "rep", e.target.value)}>
+                      <option value="">なし</option>
+                      {activeList.filter((r) => r !== form.salesRep && r !== other).map((r) => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  {splits[i].rep && (
+                    <>
+                      <div className="form-row">
+                        <label>折半P</label>
+                        <input type="number" min="0" value={splits[i].points} onChange={(e) => setSplitField(i, "points", e.target.value)} placeholder="例）5" />
+                      </div>
+                      <div className="form-row">
+                        <label>見込折半P<span className="field-hint">（未確定の場合）</span></label>
+                        <input type="number" min="0" value={splits[i].expected} onChange={(e) => setSplitField(i, "expected", e.target.value)} placeholder="例）5" />
+                      </div>
+                    </>
+                  )}
+                </Fragment>
+              );
+            })}
             <div className="form-row">
-              <label>折半Pを付ける人</label>
-              <select value={splitWithRep} onChange={(e) => setSplitWithRep(e.target.value)}>
+              <label>パスPを付ける人</label>
+              <select value={passWithRep} onChange={(e) => setPassWithRep(e.target.value)}>
                 <option value="">なし</option>
                 {activeList.filter((r) => r !== form.salesRep).map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
-            {splitWithRep && (
-              <>
-                <div className="form-row">
-                  <label>折半Pの数</label>
-                  <input type="number" min="0" value={splitPoints} onChange={(e) => setSplitPoints(e.target.value)} placeholder="例）5" />
-                </div>
-                <div className="form-row">
-                  <label>見込折半P<span className="field-hint">（未確定の場合）</span></label>
-                  <input type="number" min="0" value={splitExpectedPoints} onChange={(e) => setSplitExpectedPoints(e.target.value)} placeholder="例）5" />
-                </div>
-              </>
+            {passWithRep && (
+              <div className="form-row">
+                <label>パスPの区分<span className="field-hint">（{PASS_P_VALUE}P固定）</span></label>
+                <select value={passType} onChange={(e) => setPassType(e.target.value)}>
+                  {PASS_P_TYPES.map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
             )}
             <div className="form-row">
               <label>新規/既存</label>
