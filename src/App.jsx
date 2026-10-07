@@ -14,7 +14,7 @@ const PRODUCTS = ["addream", "AddAI"];
 const LOSS_REASONS = ["タイミングNG", "決済権なし", "考えたい", "誰かに相談必須", "費用感", "ニーズなし", "他社の話も聞きたい", "他社でやってる", "成果報酬でないとやらない", "内容刺さらず", "その他"];
 
 const REP_ROLES = ["一般", "主任", "MG", "課長", "次長"];
-const MAIN_PRODUCTS = ["Addream一括", "Addream月額", "Addreamクレ", "AddAI一括", "AddAI月額", "AddAIクレ", "LP", "Addmovie", "HP", "AI用HP", "公式LINE", "engage", "動画単品", "バナー追加", "ペライチ", "meta配信追加", "パスP", "折半P"];
+const MAIN_PRODUCTS = ["Addream一括", "Addream月額", "Addreamクレ", "AddAI一括", "AddAI月額", "AddAIクレ", "AddAI banner", "LP", "Addmovie", "HP", "AI用HP", "公式LINE", "engage", "動画単品", "バナー追加", "ペライチ", "meta配信追加", "パスP", "折半P"];
 
 const productRowClass = (product) => {
   switch (product) {
