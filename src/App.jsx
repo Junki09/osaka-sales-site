@@ -59,7 +59,7 @@ const MITOKO_OPTIONS = ["無", "済"];
 function budgetCategoryFor(product) {
   if (product === "Addream一括" || product === "Addream月額") return "Addream現金";
   if (product === "Addreamクレ") return "Addreamクレ";
-  if (product === "AddAI一括" || product === "AddAI月額" || product === "バナー追加") return "AddAI現金";
+  if (product === "AddAI一括" || product === "AddAI月額" || product === "バナー追加" || product === "AddAI banner") return "AddAI現金";
   if (product === "AddAIクレ") return "AddAIクレ";
   if (product === "LP") return "LP";
   if (product === "Addmovie") return "Addmovie";
