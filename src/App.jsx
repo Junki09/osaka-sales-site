@@ -2781,18 +2781,29 @@ function BudgetTab({ data, persist }) {
   const fiscalMonths = fiscalYearMonths(monthStr);
   let annualTarget = 0;
   let annualActual = 0;
+  let toDateTarget = 0;
+  let toDateActual = 0;
+  const nowD = new Date();
+  const curMonthStr = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, "0")}`;
   fiscalMonths.forEach((ms) => {
     const mt = (budget.monthlyTargets || {})[ms] || {};
     const auto = computeAutoBudgetActuals(payments, ms);
     const manualForMonth = ((budget.manualItems || {})[ms]) || {};
-    annualTarget += BUDGET_TOTAL_CATEGORIES.reduce((s, c) => s + Number(mt[c] || 0), 0);
-    annualActual += BUDGET_TOTAL_CATEGORIES.reduce((s, c) => {
+    const mTarget = BUDGET_TOTAL_CATEGORIES.reduce((s, c) => s + Number(mt[c] || 0), 0);
+    const mActual = BUDGET_TOTAL_CATEGORIES.reduce((s, c) => {
       if (BUDGET_MANUAL_CATEGORIES.includes(c)) {
         return s + roundP((manualForMonth[c] || []).reduce((s2, it) => s2 + Number(it.amount || 0), 0));
       }
       return s + Number(auto[c] || 0);
     }, 0);
+    annualTarget += mTarget;
+    annualActual += mActual;
+    if (ms <= curMonthStr) { toDateTarget += mTarget; toDateActual += mActual; }
   });
+  toDateTarget = roundP(toDateTarget);
+  toDateActual = roundP(toDateActual);
+  const toDateDiff = roundP(toDateActual - toDateTarget);
+  const toDateLast = fiscalMonths.filter((ms) => ms <= curMonthStr).slice(-1)[0];
   annualTarget = roundP(annualTarget);
   annualActual = roundP(annualActual);
   const annualDiff = roundP(annualActual - annualTarget);
@@ -2808,6 +2819,14 @@ function BudgetTab({ data, persist }) {
           <KpiCard label="年間目標" value={yen(annualTarget)} />
           <KpiCard label="年間実績" value={yen(annualActual)} accent={annualTarget && annualActual >= annualTarget ? "win" : undefined} />
           <KpiCard label="年間差額" value={yen(annualDiff)} accent={annualDiff >= 0 ? "win" : "lose"} />
+        </div>
+        <h3 style={{ margin: "14px 0 6px", fontSize: 14 }}>
+          今期の現状{toDateLast ? `（${fiscalMonths[0].replace("-", "年")}月〜${toDateLast.replace("-", "年")}月 累計）` : "（まだ開始前）"}
+        </h3>
+        <div className="kpi-strip payments-kpi-strip">
+          <KpiCard label="現状までの目標" value={yen(toDateTarget)} />
+          <KpiCard label="現状までの実績" value={yen(toDateActual)} accent={toDateTarget && toDateActual >= toDateTarget ? "win" : undefined} />
+          <KpiCard label="現状の差額" value={yen(toDateDiff)} accent={toDateDiff >= 0 ? "win" : "lose"} />
         </div>
       </section>
 
