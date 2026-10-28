@@ -1065,7 +1065,11 @@ function DealsTab({ data, persist, flash }) {
     .filter((d) => filterProduct === "すべて" || (d.product || PRODUCTS[0]) === filterProduct)
     .filter((d) => filterMonth === "all" || monthKey(d.apptDate) === filterMonth)
     .filter((d) => !filterDate || d.apptDate === filterDate)
-    .sort((a, b) => (a.apoDate < b.apoDate ? 1 : -1));
+    .sort((a, b) => {
+      const closed = (d) => (d.status === STATUS.APO_CANCEL || d.status === STATUS.WON || d.status === STATUS.LOST ? 1 : 0);
+      if (closed(a) !== closed(b)) return closed(a) - closed(b);
+      return a.apoDate < b.apoDate ? 1 : a.apoDate > b.apoDate ? -1 : 0;
+    });
 
   return (
     <div className="tab-panel">
